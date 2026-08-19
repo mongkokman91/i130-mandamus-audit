@@ -1,0 +1,21 @@
+# Secrets
+.env
+.env.*
+*.key
+secrets.*
+
+# Local outputs / downloaded court records
+output/
+downloads/
+*.xlsx
+*.csv
+*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Colab / Jupyter checkpoints
+.ipynb_checkpoints/
