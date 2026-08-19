@@ -1,0 +1,47 @@
+name: I-130 Mandamus Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Verify CourtListener secret is configured
+        shell: bash
+        run: |
+          if [ -z "$COURTLISTENER_API_KEY" ]; then
+            echo "COURTLISTENER_API_KEY is not configured in repository Actions secrets."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run audit
+        run: python pacer_audit.py
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: i130-mandamus-audit-results
+          path: output/
+          if-no-files-found: warn
+          retention-days: 30
