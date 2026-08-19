@@ -2,6 +2,9 @@ name: I-130 Mandamus Audit
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
