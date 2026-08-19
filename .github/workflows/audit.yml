@@ -5,9 +5,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'run-meta/**'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
@@ -48,3 +50,24 @@ jobs:
           path: output/
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Publish run metadata
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p run-meta
+          cat > run-meta/latest.json <<EOF
+          {
+            "run_id": ${{ github.run_id }},
+            "run_attempt": ${{ github.run_attempt }},
+            "head_sha": "${{ github.sha }}",
+            "event_name": "${{ github.event_name }}",
+            "workflow": "${{ github.workflow }}",
+            "repository": "${{ github.repository }}"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add run-meta/latest.json
+          git commit -m "Record latest audit workflow run [skip ci]" || exit 0
+          git push
