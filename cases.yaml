@@ -1,0 +1,86 @@
+version: 1
+
+research_scope:
+  benefit: "Form I-130"
+  focus: "pending spousal I-130 / APA / mandamus unreasonable-delay litigation"
+  target_delay_months: [12, 18]
+  outcome_labels:
+    - CONFIRMED_FAVORABLE
+    - PROBABLE_FAVORABLE
+    - CONFIRMED_ADVERSE
+    - PENDING
+    - UNKNOWN
+
+lawyers:
+  - name: "Hashim G. Jeelani"
+    search_query: 'atty_name:"Hashim G. Jeelani" "I-130"'
+  - name: "Arif Gozel"
+    search_query: 'atty_name:"Arif Gozel" "I-130"'
+  - name: "Benjamin G. Messer"
+    search_query: 'atty_name:"Benjamin G. Messer" "I-130"'
+  - name: "Carley Tatman"
+    search_query: 'atty_name:"Carley Tatman" "I-130"'
+
+# Seed cases are prior research leads, not automatically treated as proven wins.
+# `classification` is deliberately conservative and can be upgraded only when
+# an underlying filing/order expressly supports it.
+seed_cases:
+  - lawyer: "Hashim G. Jeelani"
+    case_name: "Belmonte v. Wolf"
+    court: "D.D.C."
+    docket_number: "1:20-cv-02089"
+    filed_date: "2020-07-31"
+    terminated_date: "2020-09-25"
+    relationship: "spouse"
+    service_center: "YSC"
+    delay_months_at_filing: 35
+    classification: "PROBABLE_FAVORABLE"
+    notes: "Voluntary dismissal; reason must be verified from underlying docket documents."
+
+  - lawyer: "Hashim G. Jeelani"
+    case_name: "LeHardy v. Wolf"
+    court: "D.D.C."
+    docket_number: "1:20-cv-02252"
+    filed_date: "2020-08-17"
+    terminated_date: "2020-10-13"
+    relationship: "spouse"
+    service_center: "SRC"
+    delay_months_at_filing: 22
+    classification: "PROBABLE_FAVORABLE"
+    notes: "Voluntary dismissal; reason must be verified from underlying docket documents."
+
+  - lawyer: "Hashim G. Jeelani"
+    case_name: "Khan v. McAleenan"
+    court: "D.D.C."
+    docket_number: "1:19-cv-02854"
+    filed_date: "2019-09-24"
+    terminated_date: "2020-02-07"
+    relationship: "spouse"
+    service_center: "MSC"
+    delay_months_at_filing: 50
+    classification: "PROBABLE_FAVORABLE"
+    notes: "Voluntary dismissal; reason must be verified from underlying docket documents."
+
+  - lawyer: "Carley Tatman"
+    case_name: "Rodriguez v. DHS"
+    court: "E.D. La."
+    docket_number: "2:23-cv-01709"
+    filed_date: "2023-05-19"
+    terminated_date: "2023-06-07"
+    relationship: "spouse"
+    service_center: "Nebraska"
+    delay_months_at_filing: 18
+    classification: "PROBABLE_FAVORABLE"
+    notes: "Voluntary dismissal shortly after filing; adjudication/approval causation not yet expressly established."
+
+  - lawyer: "Benjamin G. Messer"
+    case_name: "Calderon v. Edlow"
+    court: "D. Md."
+    docket_number: "8:26-cv-00655"
+    filed_date: "2026-02-17"
+    terminated_date: null
+    relationship: "spouse"
+    service_center: "Potomac"
+    delay_months_at_filing: null
+    classification: "PENDING"
+    notes: "Priority lead for extracting exact receipt date, delay at filing, and later docket outcome."
