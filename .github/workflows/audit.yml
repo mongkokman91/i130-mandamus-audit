@@ -14,7 +14,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
 
@@ -38,6 +38,9 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+
+      - name: Prepare output directory
+        run: mkdir -p output
 
       - name: Run audit
         run: python rate_limited_runner.py
