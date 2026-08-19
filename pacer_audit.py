@@ -24,18 +24,12 @@ def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as fh: return yaml.safe_load(fh)
 
 def make_session(api_key: str) -> requests.Session:
-    s=requests.Session(); s.headers.update({"Authorization":f"Token {api_key}","Accept":"application/json","User-Agent":"i130-mandamus-audit/0.2"}); return s
+    s=requests.Session(); s.headers.update({"Authorization":f"Token {api_key}","Accept":"application/json","User-Agent":"i130-mandamus-audit/0.3"}); return s
 
 def api_get(session, url, *, params=None):
     r=session.get(url,params=params,timeout=60); r.raise_for_status(); return r.json()
 
 def iter_search(session, search_params: dict[str, Any], *, max_pages=10):
-    """Search RECAP using structured CourtListener parameters.
-
-    Important: attorney filtering belongs in the `atty_name` parameter. Putting
-    `atty_name:` syntax inside q is not equivalent and previously produced false
-    zero-result searches.
-    """
     url=f"{API_BASE}/search/"; params={"type":"r", **search_params}; results=[]; pages=[]
     for _ in range(max_pages):
         payload=api_get(session,url,params=params); pages.append(payload)
@@ -46,6 +40,21 @@ def iter_search(session, search_params: dict[str, Any], *, max_pages=10):
         url=nxt; params=None
     return results,pages
 
+def is_immigration_or_mandamus(record: dict[str, Any]) -> bool:
+    text=" ".join(str(record.get(k) or "") for k in ("suitNature","cause","caseName")).lower()
+    signals=("immigration","mandamus","administrative procedure","judicial review","mayorkas","uscis","edlow","blinken","pompeo","wolf","jaddou")
+    return any(s in text for s in signals)
+
+def dedupe_and_filter(results: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, int]:
+    """Keep one row per docket and remove obvious non-immigration false positives."""
+    unique={}
+    for r in results:
+        key=r.get("docket_id") or r.get("docketNumber") or r.get("docket_number") or r.get("caseName")
+        if key not in unique: unique[key]=r
+    deduped=list(unique.values())
+    filtered=[r for r in deduped if is_immigration_or_mandamus(r)]
+    return filtered, len(deduped), len(results)-len(deduped)
+
 def pick(record,*keys):
     for k in keys:
         v=record.get(k)
@@ -53,7 +62,7 @@ def pick(record,*keys):
     return None
 
 def normalize_result(lawyer, search_params, record):
-    return {"lawyer":lawyer,"query":json.dumps(search_params,ensure_ascii=False,sort_keys=True),"case_name":pick(record,"caseName","case_name","caption","name"),"docket_number":pick(record,"docketNumber","docket_number"),"court":pick(record,"court_citation_string","court","court_id"),"date_filed":pick(record,"dateFiled","date_filed"),"date_terminated":pick(record,"dateTerminated","date_terminated"),"absolute_url":pick(record,"docket_absolute_url","absolute_url","url"),"docket_id":pick(record,"docket_id","docketId"),"description":pick(record,"description","short_description","snippet"),"search_result_raw":json.dumps(record,ensure_ascii=False,sort_keys=True)}
+    return {"lawyer":lawyer,"query":json.dumps(search_params,ensure_ascii=False,sort_keys=True),"case_name":pick(record,"caseName","case_name","caption","name"),"docket_number":pick(record,"docketNumber","docket_number"),"court":pick(record,"court_citation_string","court","court_id"),"date_filed":pick(record,"dateFiled","date_filed"),"date_terminated":pick(record,"dateTerminated","date_terminated"),"suit_nature":pick(record,"suitNature","nature_of_suit"),"cause":pick(record,"cause"),"absolute_url":pick(record,"docket_absolute_url","absolute_url","url"),"docket_id":pick(record,"docket_id","docketId"),"search_result_raw":json.dumps(record,ensure_ascii=False,sort_keys=True)}
 
 def seed_case_rows(config):
     rows=[]
@@ -80,6 +89,8 @@ def main():
         try: results,pages=iter_search(session,params,max_pages=args.max_pages)
         except requests.HTTPError as exc:
             status=exc.response.status_code if exc.response is not None else "?"; body=exc.response.text[:1000] if exc.response is not None else str(exc); print(f"WARNING: search failed for {name} (HTTP {status}): {body}",file=sys.stderr); raw["queries"].append({"lawyer":name,"search_params":params,"error":str(exc),"pages":[]}); continue
-        raw["queries"].append({"lawyer":name,"search_params":params,"result_count":len(results),"pages":pages}); rows.extend(normalize_result(name,params,r) for r in results); print(f"  found {len(results)} result(s)")
+        clean, unique_count, duplicate_count=dedupe_and_filter(results)
+        raw["queries"].append({"lawyer":name,"search_params":params,"raw_result_count":len(results),"unique_docket_count":unique_count,"filtered_docket_count":len(clean),"duplicate_rows_removed":duplicate_count,"pages":pages}); rows.extend(normalize_result(name,params,r) for r in clean)
+        print(f"  raw={len(results)} unique={unique_count} filtered={len(clean)}")
     write_outputs(Path(args.output),rows,seed_case_rows(config),raw); print(f"Done. Outputs written to: {Path(args.output).resolve()}"); print("RECAP coverage is incomplete; zero hits never prove zero PACER cases."); return 0
 if __name__=="__main__": raise SystemExit(main())
