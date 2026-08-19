@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 import yaml
 
-SEARCH_BASE = "https://www.courtlistener.com/api/rest/v3"
+SEARCH_BASE = "https://www.courtlistener.com/api/rest/v4"
 REST_BASE = "https://www.courtlistener.com/api/rest/v4"
 DEFAULT_CONFIG = "cases.yaml"
 DEFAULT_OUTPUT = "output"
@@ -25,14 +25,16 @@ def session_for(key):
     s.headers.update({
         "Authorization": f"Token {key}",
         "Accept": "application/json",
-        "User-Agent": "i130-mandamus-audit/0.5",
+        "User-Agent": "i130-mandamus-audit/0.5.1",
     })
     return s
 
 
 def api_get(s, url, params=None):
     r = s.get(url, params=params, timeout=60)
-    r.raise_for_status()
+    if not r.ok:
+        body = r.text[:1500]
+        raise requests.HTTPError(f"HTTP {r.status_code} for {r.url}: {body}", response=r)
     return r.json()
 
 
