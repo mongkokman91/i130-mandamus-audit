@@ -2,7 +2,7 @@
 
 A conservative research pipeline for comparing federal immigration litigators using CourtListener/RECAP evidence for delayed Form I-130 APA/mandamus cases.
 
-The project is designed for a mobile workflow: GitHub stores the current code, while Google Colab pulls the newest `main` branch and runs it. Secrets stay in Colab and are never committed to this repository.
+The project is designed for a mobile workflow: GitHub Actions runs the audit directly from this private repository. No Colab notebook is required for routine use.
 
 ## Current scope
 
@@ -34,47 +34,41 @@ RECAP is incomplete. A zero-result search is never treated as proof that a lawye
 - `pacer_audit.py` — CourtListener/RECAP search and export engine.
 - `cases.yaml` — lawyer queries, methodology, and curated seed cases.
 - `requirements.txt` — Python dependencies.
-- `colab_runner.ipynb` — mobile runner that syncs the private repo and downloads the Excel result.
+- `.github/workflows/audit.yml` — manual GitHub Actions runner.
+- `colab_runner.ipynb` — optional fallback runner; not needed for normal use.
 - `.gitignore` — blocks secrets, downloads, and generated audit outputs from being committed.
 
-## One-time mobile setup
+## One-time setup
 
-### 1. Create a fine-grained GitHub token
+### Add the CourtListener API key as a GitHub Actions secret
 
-Create a fine-grained personal access token restricted to **this repository only**. It only needs enough repository access to clone/read the private repo. Do not give it write access unless you later have a reason to do so.
+In this repository, open:
 
-Store the token somewhere temporarily until step 3. Never paste it into this repository.
+`Settings → Secrets and variables → Actions → New repository secret`
 
-### 2. Get your CourtListener API token
+Create exactly:
 
-Use your existing CourtListener/RECAP API token. Do not paste it into GitHub or into notebook source code.
+- Name: `COURTLISTENER_API_KEY`
+- Secret: your CourtListener/RECAP API token
 
-### 3. Add both to Google Colab Secrets
+Do not commit the token to the repository and do not put it in workflow source.
 
-Open `colab_runner.ipynb` in Google Colab. In Colab's Secrets panel add:
+## Run the audit from mobile
 
-- `GITHUB_TOKEN`
-- `COURTLISTENER_API_KEY`
+Open this repository on GitHub, then:
 
-Enable notebook access for both secrets.
+1. Tap **Actions**.
+2. Select **I-130 Mandamus Audit**.
+3. Tap **Run workflow**.
+4. Leave branch as `main` and tap **Run workflow** again.
+5. Open the completed workflow run.
+6. Under **Artifacts**, download `i130-mandamus-audit-results`.
 
-### 4. Run the notebook
-
-Use **Runtime → Run all**.
-
-The notebook will:
-
-1. securely clone or reset the local runtime to the newest GitHub `main` branch;
-2. install dependencies;
-3. run the CourtListener/RECAP audit;
-4. create the output files; and
-5. download `case_audit.xlsx` to your device.
-
-Future code changes require no notebook replacement: open the same runner and use **Run all** again.
+The artifact is retained for 30 days and contains the generated audit outputs.
 
 ## Outputs
 
-Generated under `output/` (ignored by git):
+Generated under `output/` during the workflow:
 
 - `case_audit.xlsx`
 - `search_results.csv`
@@ -83,13 +77,15 @@ Generated under `output/` (ignored by git):
 
 The workbook contains raw normalized search results, the curated seed-case audit, and the classification methodology.
 
-## Local command-line use
+## Local / Codespaces use
 
 ```bash
 export COURTLISTENER_API_KEY="..."
 pip install -r requirements.txt
 python pacer_audit.py
 ```
+
+Codespaces is optional and mainly useful for debugging or development. Routine runs should use the GitHub Actions button.
 
 ## Security
 
