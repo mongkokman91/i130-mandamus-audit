@@ -1,12 +1,10 @@
-version: 2
+version: 4
 research_scope:
   benefit: "Form I-130"
   focus: "pending spousal I-130 / APA / mandamus unreasonable-delay litigation"
   target_delay_months: [12, 18]
   outcome_labels: [CONFIRMED_FAVORABLE, PROBABLE_FAVORABLE, CONFIRMED_ADVERSE, PENDING, UNKNOWN]
 
-# CourtListener RECAP search requires attorney name as its own parameter.
-# `q` searches the indexed docket/document text for I-130.
 lawyers:
   - name: "Hashim G. Jeelani"
     search_params: {atty_name: "Hashim G. Jeelani", q: "I-130"}
@@ -16,6 +14,27 @@ lawyers:
     search_params: {atty_name: "Benjamin G. Messer", q: "I-130"}
   - name: "Carley Tatman"
     search_params: {atty_name: "Carley Tatman", q: "I-130"}
+
+# Open-ended searches used to discover additional lawyers. Results are
+# deduplicated by docket and ranked by frequency in relevant I-130/mandamus dockets.
+discovery_queries:
+  - {q: "I-130 mandamus"}
+  - {q: '"I-130" "writ of mandamus"'}
+  - {q: '"I-130" "unreasonable delay"'}
+  - {q: '"Petition for Alien Relative" mandamus'}
+  - {q: '"I-130" USCIS mandamus'}
+
+# Deterministic evidence patterns. They create evidence flags; they do not by
+# themselves turn a case into a confirmed win unless explicit result language exists.
+evidence_patterns:
+  spouse: ["husband", "wife", "spouse", "marriage", "married"]
+  i130: ["i-130", "i130", "petition for alien relative"]
+  pending: ["remains pending", "still pending", "has been pending", "pending with uscis"]
+  approval: ["i-130 was approved", "i-130 has been approved", "petition was approved", "petition has been approved", "uscis approved"]
+  adjudication: ["uscis adjudicated", "petition was adjudicated", "petition has been adjudicated", "agency adjudicated"]
+  voluntary_dismissal: ["voluntary dismissal", "notice of dismissal", "stipulation of dismissal", "stipulated dismissal"]
+  adverse: ["motion to dismiss granted", "case dismissed with prejudice", "petition denied", "complaint dismissed"]
+  service_centers: ["potomac", "ysc", "nebraska", "lin", "texas", "src", "vermont", "eac", "california", "wac", "national benefits center", "msc"]
 
 seed_cases:
   - {lawyer: "Hashim G. Jeelani", case_name: "Belmonte v. Wolf", court: "D.D.C.", docket_number: "1:20-cv-02089", filed_date: "2020-07-31", terminated_date: "2020-09-25", relationship: "spouse", service_center: "YSC", delay_months_at_filing: 35, classification: "PROBABLE_FAVORABLE", notes: "Voluntary dismissal; reason must be verified from underlying docket documents."}
