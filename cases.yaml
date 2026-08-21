@@ -1,4 +1,4 @@
-version: 5
+version: 6
 research_scope:
   benefit: "Form I-130"
   focus: "pending spousal I-130 / APA / mandamus unreasonable-delay litigation"
@@ -17,28 +17,25 @@ lawyers:
   - name: "Carley Tatman"
     search_params: {atty_name: "Carley Tatman", q: "I-130"}
 
-# Primary cohort: D. Maryland. These searches measure local filing experience,
-# comparable I-130/Potomac cases, dispositions, and venue-transfer problems.
-primary_discovery_queries:
+# Discovery is deliberately Maryland-first, with nationwide Potomac/YSC and
+# foreign-resident controls. Query provenance is retained in raw_api.json.
+discovery_queries:
+  # Primary D. Maryland cohort
   - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "I-130"}
   - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "Potomac"}
   - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "YSC"}
   - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"Voluntary Dismissal"'}
   - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "approved adjudicated"}
   - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "venue transfer"}
-
-# Nationwide control cohort: find where Potomac/YSC I-130 mandamus cases are
-# actually filed, including possible foreign-resident plaintiffs.
-control_discovery_queries:
+  # Nationwide Potomac/YSC control cohort
   - {q: '"I-130" Potomac mandamus'}
   - {q: '"I-130" YSC mandamus'}
   - {q: '"Petition for Alien Relative" Potomac mandamus'}
+  # Foreign-resident comparators
   - {q: '"I-130" Canada mandamus'}
   - {q: '"I-130" "resides in Canada" mandamus'}
   - {q: '"I-130" "resides outside the United States" mandamus'}
-
-# Legacy broad discovery remains as a secondary catch-all.
-discovery_queries:
+  # Broad catch-all controls
   - {q: "I-130 mandamus"}
   - {q: '"I-130" "writ of mandamus"'}
   - {q: '"I-130" "unreasonable delay"'}
