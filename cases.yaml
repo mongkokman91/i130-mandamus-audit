@@ -1,8 +1,10 @@
-version: 4
+version: 5
 research_scope:
   benefit: "Form I-130"
   focus: "pending spousal I-130 / APA / mandamus unreasonable-delay litigation"
   target_delay_months: [12, 18]
+  primary_venue_hypothesis: "D. Maryland"
+  service_center_hypothesis: "Potomac / YSC"
   outcome_labels: [CONFIRMED_FAVORABLE, PROBABLE_FAVORABLE, CONFIRMED_ADVERSE, PENDING, UNKNOWN]
 
 lawyers:
@@ -15,8 +17,27 @@ lawyers:
   - name: "Carley Tatman"
     search_params: {atty_name: "Carley Tatman", q: "I-130"}
 
-# Open-ended searches used to discover additional lawyers. Results are
-# deduplicated by docket and ranked by frequency in relevant I-130/mandamus dockets.
+# Primary cohort: D. Maryland. These searches measure local filing experience,
+# comparable I-130/Potomac cases, dispositions, and venue-transfer problems.
+primary_discovery_queries:
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "I-130"}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "Potomac"}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "YSC"}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"Voluntary Dismissal"'}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "approved adjudicated"}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "venue transfer"}
+
+# Nationwide control cohort: find where Potomac/YSC I-130 mandamus cases are
+# actually filed, including possible foreign-resident plaintiffs.
+control_discovery_queries:
+  - {q: '"I-130" Potomac mandamus'}
+  - {q: '"I-130" YSC mandamus'}
+  - {q: '"Petition for Alien Relative" Potomac mandamus'}
+  - {q: '"I-130" Canada mandamus'}
+  - {q: '"I-130" "resides in Canada" mandamus'}
+  - {q: '"I-130" "resides outside the United States" mandamus'}
+
+# Legacy broad discovery remains as a secondary catch-all.
 discovery_queries:
   - {q: "I-130 mandamus"}
   - {q: '"I-130" "writ of mandamus"'}
@@ -24,8 +45,6 @@ discovery_queries:
   - {q: '"Petition for Alien Relative" mandamus'}
   - {q: '"I-130" USCIS mandamus'}
 
-# Deterministic evidence patterns. They create evidence flags; they do not by
-# themselves turn a case into a confirmed win unless explicit result language exists.
 evidence_patterns:
   spouse: ["husband", "wife", "spouse", "marriage", "married"]
   i130: ["i-130", "i130", "petition for alien relative"]
@@ -41,4 +60,4 @@ seed_cases:
   - {lawyer: "Hashim G. Jeelani", case_name: "LeHardy v. Wolf", court: "D.D.C.", docket_number: "1:20-cv-02252", filed_date: "2020-08-17", terminated_date: "2020-10-13", relationship: "spouse", service_center: "SRC", delay_months_at_filing: 22, classification: "PROBABLE_FAVORABLE", notes: "Voluntary dismissal; reason must be verified from underlying docket documents."}
   - {lawyer: "Hashim G. Jeelani", case_name: "Khan v. McAleenan", court: "D.D.C.", docket_number: "1:19-cv-02854", filed_date: "2019-09-24", terminated_date: "2020-02-07", relationship: "spouse", service_center: "MSC", delay_months_at_filing: 50, classification: "PROBABLE_FAVORABLE", notes: "Voluntary dismissal; reason must be verified from underlying docket documents."}
   - {lawyer: "Carley Tatman", case_name: "Rodriguez v. DHS", court: "E.D. La.", docket_number: "2:23-cv-01709", filed_date: "2023-05-19", terminated_date: "2023-06-07", relationship: "spouse", service_center: "Nebraska", delay_months_at_filing: 18, classification: "PROBABLE_FAVORABLE", notes: "Voluntary dismissal shortly after filing; adjudication/approval causation not yet expressly established."}
-  - {lawyer: "Benjamin G. Messer", case_name: "Calderon v. Edlow", court: "D. Md.", docket_number: "8:26-cv-00655", filed_date: "2026-02-17", terminated_date: null, relationship: "spouse", service_center: "Potomac", delay_months_at_filing: null, classification: "PENDING", notes: "Priority lead for extracting exact receipt date, delay at filing, and later docket outcome."}
+  - {lawyer: "Benjamin G. Messer", case_name: "Calderon v. Edlow", court: "D. Md.", docket_number: "8:26-cv-00655", filed_date: "2026-02-17", terminated_date: null, relationship: "spouse", service_center: "Potomac", delay_months_at_filing: null, classification: "PENDING", notes: "Priority lead for exact receipt date, venue pleading, and later outcome."}
