@@ -25,7 +25,7 @@ def session_for(key):
     s.headers.update({
         "Authorization": f"Token {key}",
         "Accept": "application/json",
-        "User-Agent": "i130-mandamus-audit/0.6",
+        "User-Agent": "i130-mandamus-audit/0.6.1",
     })
     return s
 
@@ -153,11 +153,6 @@ def parse_date_tokens(match):
 
 
 def find_receipt_date(text, lawsuit_filed=None):
-    """Extract the filing/receipt date only from an I-130-specific local context.
-
-    Generic references to a 'petition' are intentionally excluded because they caused
-    unrelated filing dates to be selected in earlier versions.
-    """
     date_patterns = [
         r"(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+20\d{2}",
         r"\b(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12]\d|3[01])/20\d{2}\b",
@@ -173,7 +168,6 @@ def find_receipt_date(text, lawsuit_filed=None):
                 date = parse_date_tokens(m)
                 if not date:
                     continue
-                # Score proximity between the date, I-130 reference, and filing verb.
                 before = ctx[max(0, m.start()-180):m.end()+180]
                 score = 0
                 if re.search(r"\bI[-\s]?130\b|Petition for Alien Relative", before, re.I): score += 4
@@ -186,15 +180,12 @@ def find_receipt_date(text, lawsuit_filed=None):
             candidates = [c for c in candidates if pd.to_datetime(c[1]) <= filed]
     if not candidates:
         return None, None, None
-    # Prefer highest-confidence language; ties prefer the earliest date because later dates
-    # are often downstream USCIS events rather than the original I-130 filing.
     candidates.sort(key=lambda x: (-x[0], pd.to_datetime(x[1])))
     score, date, ctx = candidates[0]
     return date, score, ctx
 
 
 def infer_service_center(text):
-    """Require service-center evidence to be tied to an I-130/receipt context."""
     center_names = {
         "potomac": "Potomac", "ysc": "YSC", "texas service center": "Texas",
         "src": "SRC", "nebraska service center": "Nebraska", "lin": "LIN",
@@ -214,7 +205,6 @@ def infer_service_center(text):
 
 
 def specific_i130_outcome(text):
-    """Return explicit case-specific I-130 disposition evidence only."""
     favorable_patterns = [
         r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*(?:approved|adjudicated)",
         r"(?:approved|adjudicated).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
@@ -240,7 +230,6 @@ def classify(text, flags, terminated):
     if explicit:
         return explicit, context
     if flags.get("adverse"):
-        # Generic adverse language is insufficient to say the I-130 itself lost.
         return "UNKNOWN", None
     if flags.get("voluntary_dismissal") and terminated:
         return "PROBABLE_FAVORABLE", None
@@ -264,7 +253,7 @@ def tier_case(row):
 
 
 def audit_case(s, row, patterns):
-    entries, docs = docket_docs(s, int(row["docket_id"]))
+    _, docs = docket_docs(s, int(row["docket_id"]))
     combined, evidence = [], []
     for d in docs:
         txt = document_text(s, d)
@@ -327,12 +316,18 @@ def looks_like_government_counsel(name):
     return any(x in lo for x in blocked)
 
 
-def plaintiff_counsel_from_docket(s, docket_id):
-    """Infer plaintiff filing counsel from the initiating complaint/petition docket description.
+def sortable_document_number(value):
+    """Normalize CourtListener document numbers so mixed strings/ints sort safely."""
+    if value in (None, ""):
+        return (1, 10**9, "")
+    text = str(value).strip()
+    m = re.match(r"^(\d+)", text)
+    if m:
+        return (0, int(m.group(1)), text)
+    return (0, 10**9 - 1, text)
 
-    PACER/RECAP descriptions commonly end with a filing attorney parenthetical such as
-    '(Jeelani, Hashim)'. This is materially safer than counting every attorney indexed on a docket.
-    """
+
+def plaintiff_counsel_from_docket(s, docket_id):
     try:
         _, docs = docket_docs(s, int(docket_id))
     except Exception:
@@ -342,9 +337,8 @@ def plaintiff_counsel_from_docket(s, docket_id):
         desc = " ".join(str(d.get(k) or "") for k in ("entry_description", "description", "short_description"))
         if re.search(r"\b(complaint|petition for writ|petition|civil complaint)\b", desc, re.I):
             starters.append((d, desc))
-    starters.sort(key=lambda x: (x[0].get("document_number") is None, x[0].get("document_number") or 9999, x[0].get("entry_date") or "9999"))
+    starters.sort(key=lambda x: (sortable_document_number(x[0].get("document_number")), str(x[0].get("entry_date") or "9999")))
     for d, desc in starters[:3]:
-        # Filing attorney is usually the final parenthetical before an entered/transferred marker.
         parens = re.findall(r"\(([^()]{3,100})\)", desc)
         for candidate in reversed(parens):
             candidate = candidate.strip()
@@ -369,7 +363,11 @@ def discover(s, queries, max_pages, error_rows):
     lawyer_counts = Counter()
     rows = []
     for r in dockets.values():
-        counsel, source_desc = plaintiff_counsel_from_docket(s, r.get("docket_id"))
+        try:
+            counsel, source_desc = plaintiff_counsel_from_docket(s, r.get("docket_id"))
+        except Exception as exc:
+            error_rows.append({"stage": "discovery_docket", "target": str(r.get("docket_id")), "error": repr(exc)})
+            continue
         if counsel and not looks_like_government_counsel(counsel):
             lawyer_counts[counsel] += 1
             rows.append({
@@ -499,10 +497,19 @@ def main():
             print(f"audit {i}/{len(unique)} {r['case_name']}")
         except Exception as exc:
             errors.append({"stage": "case_audit", "target": f"{r.get('case_name')} | {r.get('docket_id')}", "error": repr(exc), "traceback": traceback.format_exc(limit=3)})
-            fallback = {**r, "outcome": "UNKNOWN", "tier": 4, "audit_error": repr(exc)}
-            audited.append(fallback)
-    discovery_cases, discovery_ranking, discovery_raw = discover(s, cfg.get("discovery_queries", []), args.max_pages, errors)
-    raw["discovery"] = discovery_raw
+            audited.append({**r, "outcome": "UNKNOWN", "tier": 4, "audit_error": repr(exc)})
+
+    # Persist the expensive named-case audit before optional discovery. If discovery later
+    # fails, Actions still uploads the useful case evidence instead of an empty artifact.
+    write_outputs(out, audited, [], [], seed_rows(cfg), errors, raw)
+
+    try:
+        discovery_cases, discovery_ranking, discovery_raw = discover(s, cfg.get("discovery_queries", []), args.max_pages, errors)
+        raw["discovery"] = discovery_raw
+    except Exception as exc:
+        errors.append({"stage": "discovery_fatal", "target": "all", "error": repr(exc), "traceback": traceback.format_exc(limit=3)})
+        discovery_cases, discovery_ranking = [], []
+
     write_outputs(out, audited, discovery_ranking, discovery_cases, seed_rows(cfg), errors, raw)
     print("Done", out.resolve())
     print("Errors captured:", len(errors))
