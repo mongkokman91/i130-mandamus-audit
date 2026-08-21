@@ -25,7 +25,7 @@ def session_for(key):
     s.headers.update({
         "Authorization": f"Token {key}",
         "Accept": "application/json",
-        "User-Agent": "i130-mandamus-audit/0.5.1",
+        "User-Agent": "i130-mandamus-audit/0.6",
     })
     return s
 
@@ -137,42 +137,116 @@ def evidence_flags(text, patterns):
     return {k: any(term.lower() in lo for term in vals) for k, vals in patterns.items()}
 
 
-def find_receipt_date(text):
-    month = r"(January|February|March|April|May|June|July|August|September|October|November|December)"
-    patterns = [
-        rf"(?:filed|submitted|received).{{0,120}}(?:I-130|petition).{{0,120}}{month}\s+(\d{{1,2}}),\s+(20\d{{2}})",
-        rf"(?:I-130|petition).{{0,120}}(?:filed|submitted|received).{{0,120}}{month}\s+(\d{{1,2}}),\s+(20\d{{2}})",
-        rf"On\s+{month}\s+(\d{{1,2}}),\s+(20\d{{2}}).{{0,100}}(?:filed|submitted).{{0,80}}(?:I-130|Petition for Alien Relative)",
+def contexts(text, needle_pattern, radius=260):
+    out = []
+    for m in re.finditer(needle_pattern, text, re.I):
+        out.append(text[max(0, m.start()-radius): min(len(text), m.end()+radius)])
+    return out
+
+
+def parse_date_tokens(match):
+    token = match.group(0)
+    dt = pd.to_datetime(token, errors="coerce")
+    if pd.isna(dt):
+        return None
+    return dt.date().isoformat()
+
+
+def find_receipt_date(text, lawsuit_filed=None):
+    """Extract the filing/receipt date only from an I-130-specific local context.
+
+    Generic references to a 'petition' are intentionally excluded because they caused
+    unrelated filing dates to be selected in earlier versions.
+    """
+    date_patterns = [
+        r"(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+20\d{2}",
+        r"\b(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12]\d|3[01])/20\d{2}\b",
+        r"\b20\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b",
     ]
-    for pattern in patterns:
-        m = re.search(pattern, text, re.I | re.S)
+    filing_words = r"filed|submitted|received|receipt date|priority date"
+    candidates = []
+    for ctx in contexts(text, r"\bI[-\s]?130\b|Petition for Alien Relative", radius=320):
+        if not re.search(filing_words, ctx, re.I):
+            continue
+        for dp in date_patterns:
+            for m in re.finditer(dp, ctx, re.I):
+                date = parse_date_tokens(m)
+                if not date:
+                    continue
+                # Score proximity between the date, I-130 reference, and filing verb.
+                before = ctx[max(0, m.start()-180):m.end()+180]
+                score = 0
+                if re.search(r"\bI[-\s]?130\b|Petition for Alien Relative", before, re.I): score += 4
+                if re.search(filing_words, before, re.I): score += 4
+                if re.search(r"receipt|priority", before, re.I): score += 1
+                candidates.append((score, date, re.sub(r"\s+", " ", before).strip()))
+    if lawsuit_filed:
+        filed = pd.to_datetime(lawsuit_filed, errors="coerce")
+        if pd.notna(filed):
+            candidates = [c for c in candidates if pd.to_datetime(c[1]) <= filed]
+    if not candidates:
+        return None, None, None
+    # Prefer highest-confidence language; ties prefer the earliest date because later dates
+    # are often downstream USCIS events rather than the original I-130 filing.
+    candidates.sort(key=lambda x: (-x[0], pd.to_datetime(x[1])))
+    score, date, ctx = candidates[0]
+    return date, score, ctx
+
+
+def infer_service_center(text):
+    """Require service-center evidence to be tied to an I-130/receipt context."""
+    center_names = {
+        "potomac": "Potomac", "ysc": "YSC", "texas service center": "Texas",
+        "src": "SRC", "nebraska service center": "Nebraska", "lin": "LIN",
+        "vermont service center": "Vermont", "eac": "EAC",
+        "california service center": "California", "wac": "WAC",
+        "national benefits center": "NBC", "msc": "MSC",
+    }
+    for ctx in contexts(text, r"\bI[-\s]?130\b|Petition for Alien Relative|receipt(?: number)?", radius=220):
+        lo = ctx.lower()
+        for needle, label in center_names.items():
+            if re.search(rf"\b{re.escape(needle)}\b", lo):
+                return label, re.sub(r"\s+", " ", ctx).strip()
+        m = re.search(r"\b(YSC|SRC|LIN|EAC|WAC|MSC)\d{8,13}\b", ctx, re.I)
         if m:
-            try:
-                return pd.to_datetime(" ".join(m.groups())).date().isoformat()
-            except Exception:
-                pass
-    return None
+            return m.group(1).upper(), re.sub(r"\s+", " ", ctx).strip()
+    return None, None
 
 
-def infer_service_center(text, terms):
-    lo = text.lower()
-    for term in terms:
-        if term.lower() in lo:
-            return term
-    receipt = re.search(r"\b(YSC|SRC|LIN|EAC|WAC|MSC)[-\s]?\d", text, re.I)
-    return receipt.group(1).upper() if receipt else None
+def specific_i130_outcome(text):
+    """Return explicit case-specific I-130 disposition evidence only."""
+    favorable_patterns = [
+        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*(?:approved|adjudicated)",
+        r"(?:approved|adjudicated).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
+        r"USCIS.{0,120}(?:approved|adjudicated).{0,160}(?:plaintiff(?:'s|s)?\s+)?(?:I[-\s]?130|Petition for Alien Relative)",
+    ]
+    adverse_patterns = [
+        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is)?\s*(?:denied|rejected)",
+        r"(?:denied|rejected).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
+    ]
+    for p in favorable_patterns:
+        m = re.search(p, text, re.I | re.S)
+        if m:
+            return "CONFIRMED_FAVORABLE", re.sub(r"\s+", " ", text[max(0,m.start()-120):m.end()+120]).strip()
+    for p in adverse_patterns:
+        m = re.search(p, text, re.I | re.S)
+        if m:
+            return "CONFIRMED_ADVERSE", re.sub(r"\s+", " ", text[max(0,m.start()-120):m.end()+120]).strip()
+    return None, None
 
 
-def classify(flags, terminated):
+def classify(text, flags, terminated):
+    explicit, context = specific_i130_outcome(text)
+    if explicit:
+        return explicit, context
     if flags.get("adverse"):
-        return "CONFIRMED_ADVERSE"
-    if flags.get("approval") or flags.get("adjudication"):
-        return "CONFIRMED_FAVORABLE"
+        # Generic adverse language is insufficient to say the I-130 itself lost.
+        return "UNKNOWN", None
     if flags.get("voluntary_dismissal") and terminated:
-        return "PROBABLE_FAVORABLE"
+        return "PROBABLE_FAVORABLE", None
     if not terminated:
-        return "PENDING"
-    return "UNKNOWN"
+        return "PENDING", None
+    return "UNKNOWN", None
 
 
 def tier_case(row):
@@ -198,34 +272,42 @@ def audit_case(s, row, patterns):
             continue
         combined.append(txt)
         flags = evidence_flags(txt, patterns)
-        if any(flags.values()):
+        explicit_outcome, explicit_ctx = specific_i130_outcome(txt)
+        if any(flags.values()) or explicit_outcome:
             evidence.append({
                 "document_id": d.get("id"),
                 "document_number": d.get("document_number"),
                 "entry_date": d.get("entry_date"),
                 "description": d.get("description") or d.get("short_description"),
                 "flags": ";".join(k for k, v in flags.items() if v),
+                "explicit_i130_outcome": explicit_outcome,
+                "explicit_i130_context": explicit_ctx,
             })
     text = "\n".join(combined)
     flags = evidence_flags(text, patterns)
-    receipt = find_receipt_date(text)
-    service = infer_service_center(text, patterns.get("service_centers", []))
+    receipt, receipt_score, receipt_context = find_receipt_date(text, row.get("date_filed"))
+    service, service_context = infer_service_center(text)
     filed = pd.to_datetime(row.get("date_filed"), errors="coerce", utc=True)
     rec = pd.to_datetime(receipt, errors="coerce", utc=True)
     delay = round((filed - rec).days / 30.4375, 1) if pd.notna(filed) and pd.notna(rec) else None
+    outcome, outcome_context = classify(text, flags, row.get("date_terminated"))
     result = {
         **row,
         "relationship_evidence": "spouse" if flags.get("spouse") else None,
         "i130_evidence": flags.get("i130", False),
         "pending_language": flags.get("pending", False),
         "receipt_date_extracted": receipt,
+        "receipt_date_confidence_score": receipt_score,
+        "receipt_date_context": receipt_context,
         "delay_months_extracted": delay,
         "service_center_evidence": service,
+        "service_center_context": service_context,
         "document_count": len(docs),
         "evidence_document_count": len(evidence),
-        "outcome": classify(flags, row.get("date_terminated")),
-        "approval_language": flags.get("approval", False),
-        "adjudication_language": flags.get("adjudication", False),
+        "outcome": outcome,
+        "outcome_context": outcome_context,
+        "approval_language": outcome == "CONFIRMED_FAVORABLE",
+        "adjudication_language": outcome == "CONFIRMED_FAVORABLE",
         "voluntary_dismissal_language": flags.get("voluntary_dismissal", False),
         "adverse_language": flags.get("adverse", False),
         "evidence_json": json.dumps(evidence, ensure_ascii=False),
@@ -233,6 +315,43 @@ def audit_case(s, row, patterns):
     result["tier"] = tier_case(result)
     result["potomac_ysc_bonus"] = bool((service or "").lower() in {"potomac", "ysc"})
     return result
+
+
+def looks_like_government_counsel(name):
+    lo = (name or "").lower()
+    blocked = (
+        "ausa", "assistant united states attorney", "united states attorney", "u.s. attorney",
+        "department of justice", "civil division", "office of immigration litigation",
+        "trial attorney", "government counsel", "us attorney", "doj"
+    )
+    return any(x in lo for x in blocked)
+
+
+def plaintiff_counsel_from_docket(s, docket_id):
+    """Infer plaintiff filing counsel from the initiating complaint/petition docket description.
+
+    PACER/RECAP descriptions commonly end with a filing attorney parenthetical such as
+    '(Jeelani, Hashim)'. This is materially safer than counting every attorney indexed on a docket.
+    """
+    try:
+        _, docs = docket_docs(s, int(docket_id))
+    except Exception:
+        return None, None
+    starters = []
+    for d in docs:
+        desc = " ".join(str(d.get(k) or "") for k in ("entry_description", "description", "short_description"))
+        if re.search(r"\b(complaint|petition for writ|petition|civil complaint)\b", desc, re.I):
+            starters.append((d, desc))
+    starters.sort(key=lambda x: (x[0].get("document_number") is None, x[0].get("document_number") or 9999, x[0].get("entry_date") or "9999"))
+    for d, desc in starters[:3]:
+        # Filing attorney is usually the final parenthetical before an entered/transferred marker.
+        parens = re.findall(r"\(([^()]{3,100})\)", desc)
+        for candidate in reversed(parens):
+            candidate = candidate.strip()
+            if "," in candidate and not looks_like_government_counsel(candidate):
+                if not re.search(r"attachments?|entered|transferred|filing fee|receipt", candidate, re.I):
+                    return candidate, desc
+    return None, starters[0][1] if starters else None
 
 
 def discover(s, queries, max_pages, error_rows):
@@ -250,16 +369,19 @@ def discover(s, queries, max_pages, error_rows):
     lawyer_counts = Counter()
     rows = []
     for r in dockets.values():
-        for attorney in r.get("attorney") or []:
-            lawyer_counts[attorney] += 1
+        counsel, source_desc = plaintiff_counsel_from_docket(s, r.get("docket_id"))
+        if counsel and not looks_like_government_counsel(counsel):
+            lawyer_counts[counsel] += 1
             rows.append({
-                "lawyer": attorney,
+                "lawyer": counsel,
                 "case_name": r.get("caseName"),
                 "docket_number": r.get("docketNumber"),
                 "court": r.get("court_citation_string"),
                 "docket_id": r.get("docket_id"),
+                "counsel_side": "plaintiff_filing_counsel",
+                "counsel_source_description": source_desc,
             })
-    ranking = [{"lawyer": k, "discovered_relevant_dockets": v} for k, v in lawyer_counts.most_common()]
+    ranking = [{"lawyer": k, "verified_plaintiff_filing_dockets": v} for k, v in lawyer_counts.most_common()]
     return rows, ranking, raw
 
 
@@ -285,8 +407,10 @@ def lawyer_stats(audited):
         adverse = sum(r.get("outcome") == "CONFIRMED_ADVERSE" for r in rows)
         probable = sum(r.get("outcome") == "PROBABLE_FAVORABLE" for r in rows)
         pending = sum(r.get("outcome") == "PENDING" for r in rows)
+        unknown = sum(r.get("outcome") == "UNKNOWN" for r in rows)
         tier_counts = {t: sum(r.get("tier") == t for r in rows) for t in (1, 2, 3, 4)}
         ysc = sum(bool(r.get("potomac_ysc_bonus")) for r in rows)
+        reliable_delay = sum(r.get("receipt_date_confidence_score") is not None and r.get("receipt_date_confidence_score") >= 8 for r in rows)
         score = confirmed * 100 + tier_counts[1] * 30 + tier_counts[2] * 15 + tier_counts[3] * 5 + ysc * 10 - adverse * 40
         stats.append({
             "lawyer": lawyer,
@@ -295,11 +419,13 @@ def lawyer_stats(audited):
             "probable_favorable_not_counted_as_win": probable,
             "confirmed_adverse": adverse,
             "pending": pending,
+            "unknown": unknown,
             "tier1_cases": tier_counts[1],
             "tier2_cases": tier_counts[2],
             "tier3_cases": tier_counts[3],
             "tier4_cases": tier_counts[4],
             "potomac_ysc_cases": ysc,
+            "high_confidence_receipt_dates": reliable_delay,
             "confirmed_win_rate": round(confirmed / (confirmed + adverse), 3) if confirmed + adverse else None,
             "ranking_score": score,
         })
@@ -326,9 +452,12 @@ def write_outputs(out, audited, discovery_ranking, discovery_cases, seeds, error
             ["Tier 2", "Spousal pending I-130 at any delay length."],
             ["Tier 3", "Other pending family I-130."],
             ["Tier 4", "Broader immigration/USCIS delay litigation."],
-            ["CONFIRMED_FAVORABLE", "Explicit approval/adjudication language found."],
+            ["CONFIRMED_FAVORABLE", "Requires explicit I-130/Petition for Alien Relative approval or adjudication language in local context."],
             ["PROBABLE_FAVORABLE", "Voluntary/stipulated dismissal only; NOT counted as a confirmed win."],
-            ["CONFIRMED_ADVERSE", "Explicit adverse disposition language found."],
+            ["CONFIRMED_ADVERSE", "Requires explicit I-130/Petition for Alien Relative denial/rejection language."],
+            ["Receipt date", "Extracted only from I-130-specific filing/receipt context; generic petition dates are excluded."],
+            ["Service center", "Accepted only from I-130/receipt-local context, including receipt-prefix evidence."],
+            ["Lawyer discovery", "Counts plaintiff filing counsel inferred from the initiating complaint/petition description; government-side indexed counsel are not counted."],
         ], columns=["item", "rule"])
         methodology.to_excel(w, sheet_name="Methodology", index=False)
     with (out / "raw_api.json").open("w", encoding="utf-8") as f:
