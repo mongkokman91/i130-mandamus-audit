@@ -490,16 +490,37 @@ def plaintiff_counsel_from_docket(s, docket_id):
     return None, starters[0][1] if starters else None
 
 
-def discover(s, queries, max_pages, error_rows):
+def prioritize_discovery_records(records, max_dockets):
+    """Prefer recent Maryland cases, then bounded controls."""
+    def key(record):
+        cohort = record.get("_discovery_cohort") or ""
+        priority = 0 if cohort == "maryland_primary" else 1
+        filed = pd.to_datetime(record.get("dateFiled"), errors="coerce")
+        filed_rank = -filed.value if pd.notna(filed) else 0
+        return (priority, filed_rank, str(record.get("docket_id") or ""))
+    ordered = sorted(records, key=key)
+    return ordered[:max_dockets] if max_dockets else ordered
+
+
+def discover(s, queries, max_pages, error_rows, max_dockets=None):
     dockets, raw = {}, []
     failed_queries = 0
     for params in queries:
+        cohort = params.get("_cohort") or "control"
+        search_params = {k: v for k, v in params.items() if not k.startswith("_")}
         try:
-            rs, pages = search(s, params, max_pages)
+            rs, pages = search(s, search_params, max_pages)
             raw.append({"params": params, "count": len(rs), "pages": pages})
             for r in dedupe(rs):
                 if relevant(r) and r.get("docket_id"):
-                    dockets.setdefault(str(r.get("docket_id")), r)
+                    candidate = dict(r)
+                    candidate["_discovery_cohort"] = cohort
+                    current = dockets.get(str(r.get("docket_id")))
+                    if current is None or (
+                        cohort == "maryland_primary"
+                        and current.get("_discovery_cohort") != "maryland_primary"
+                    ):
+                        dockets[str(r.get("docket_id"))] = candidate
         except Exception as exc:
             failed_queries += 1
             error_rows.append({"stage": "discovery", "target": json.dumps(params), "error": repr(exc)})
@@ -511,7 +532,7 @@ def discover(s, queries, max_pages, error_rows):
         )
     lawyer_counts = Counter()
     rows = []
-    for r in dockets.values():
+    for r in prioritize_discovery_records(dockets.values(), max_dockets):
         try:
             counsel, source_desc = plaintiff_counsel_from_docket(s, r.get("docket_id"))
         except Exception as exc:
@@ -526,6 +547,7 @@ def discover(s, queries, max_pages, error_rows):
                 source="focused_discovery",
             )
             case_row.update({
+                "discovery_cohort": r.get("_discovery_cohort"),
                 "counsel_side": "plaintiff_filing_counsel",
                 "counsel_source_description": source_desc,
             })
@@ -653,11 +675,21 @@ def write_outputs(out, audited, discovery_ranking, discovery_cases, seeds, error
         json.dump(raw, f, ensure_ascii=False, indent=2)
 
 
+def checkpoint_outputs(out, audited, discovery_ranking, discovery_cases, cfg, errors, raw):
+    """Persist all useful work completed so far after each expensive case audit."""
+    write_outputs(
+        out, audited, discovery_ranking, discovery_cases,
+        seed_rows(cfg), errors, raw,
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=DEFAULT_CONFIG)
     ap.add_argument("--output", default=DEFAULT_OUTPUT)
     ap.add_argument("--max-pages", type=int, default=10)
+    ap.add_argument("--max-dockets", type=int, default=10)
+    ap.add_argument("--cohort", choices=("maryland_primary", "canada_control"))
     args = ap.parse_args()
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
@@ -668,6 +700,12 @@ def main():
         (out / "fatal_error.txt").write_text("COURTLISTENER_API_KEY is not set\n")
         return 2
     cfg = load_config(args.config)
+    discovery_queries = cfg.get("discovery_queries", [])
+    if args.cohort:
+        discovery_queries = [
+            query for query in discovery_queries
+            if query.get("_cohort") == args.cohort
+        ]
     s = session_for(key)
     named = []
     for x in cfg.get("lawyers", []):
@@ -692,10 +730,12 @@ def main():
 
     # Persist the expensive named-case audit before optional discovery. If discovery later
     # fails, Actions still uploads the useful case evidence instead of an empty artifact.
-    write_outputs(out, audited, [], [], seed_rows(cfg), errors, raw)
+    checkpoint_outputs(out, audited, [], [], cfg, errors, raw)
 
     try:
-        discovery_cases, discovery_ranking, discovery_raw = discover(s, cfg.get("discovery_queries", []), args.max_pages, errors)
+        discovery_cases, discovery_ranking, discovery_raw = discover(
+            s, discovery_queries, args.max_pages, errors, args.max_dockets
+        )
         raw["discovery"] = discovery_raw
     except Exception as exc:
         errors.append({"stage": "discovery_fatal", "target": "all", "error": repr(exc), "traceback": traceback.format_exc(limit=3)})
@@ -710,6 +750,10 @@ def main():
         try:
             audited.append(audit_case(s, row, cfg.get("evidence_patterns", {})))
             print(f"focused audit {i}/{len(discovery_to_audit)} {row['case_name']}")
+            checkpoint_outputs(
+                out, audited, discovery_ranking, discovery_cases,
+                cfg, errors, raw,
+            )
         except Exception as exc:
             errors.append({
                 "stage": "focused_case_audit",
@@ -719,7 +763,7 @@ def main():
             })
             audited.append({**row, "outcome": "UNKNOWN", "tier": 4, "audit_error": repr(exc)})
 
-    write_outputs(out, audited, discovery_ranking, discovery_cases, seed_rows(cfg), errors, raw)
+    checkpoint_outputs(out, audited, discovery_ranking, discovery_cases, cfg, errors, raw)
     print("Done", out.resolve())
     print("Errors captured:", len(errors))
     required_search_failed = any(
