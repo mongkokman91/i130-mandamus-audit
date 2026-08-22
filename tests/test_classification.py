@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from pacer_audit import (
     classify,
@@ -7,6 +8,7 @@ from pacer_audit import (
     is_us_citizen_petitioner,
     is_initiating_document,
     looks_like_government_counsel,
+    plaintiff_counsel_from_docket,
     specific_i130_outcome,
 )
 
@@ -22,6 +24,29 @@ class OutcomeClassificationTests(unittest.TestCase):
     def test_amended_complaint_is_ineligible(self):
         doc = {"entry_description": "AMENDED COMPLAINT"}
         self.assertTrue(is_initiating_document(doc))
+
+    def test_motion_referencing_complaint_is_not_initiating(self):
+        doc = {
+            "document_number": "12",
+            "entry_description": "Consent MOTION for Extension of Time re 1 Complaint",
+        }
+        self.assertFalse(is_initiating_document(doc))
+
+    @patch("pacer_audit.docket_docs")
+    def test_counsel_comes_only_from_initiating_pleading(self, mocked_docs):
+        mocked_docs.return_value = ([], [
+            {
+                "document_number": "12",
+                "entry_description": "Consent MOTION for Extension re 1 Complaint (Andersen, Jane)",
+            },
+            {
+                "document_number": "1",
+                "entry_description": "COMPLAINT against USCIS (Davis, Timothy)",
+            },
+        ])
+        counsel, source = plaintiff_counsel_from_docket(object(), 123)
+        self.assertEqual(counsel, "Davis, Timothy")
+        self.assertTrue(source.startswith("COMPLAINT"))
 
     def test_hypothetical_approval_is_not_confirmed(self):
         text = "If approved, Plaintiff's I-130 will permit the next immigration step."

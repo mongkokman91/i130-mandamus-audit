@@ -19,6 +19,7 @@ class DecisionGradeGuardrailTests(unittest.TestCase):
         rows = [{
             "lawyer": "Pending Counsel",
             "outcome": "PENDING",
+            "i130_pending_at_filing": True,
             "tier": 1,
             "potomac_ysc_bonus": True,
             "receipt_date_confidence_score": 9,

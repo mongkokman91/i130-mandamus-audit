@@ -3,7 +3,7 @@ research_scope:
   benefit: "Form I-130"
   focus: "D. Maryland I-130 / APA / mandamus delay litigation"
   date_range: ["2016-08-01", "present"]
-  outcome_labels: [CONFIRMED_FAVORABLE, PROBABLE_FAVORABLE, ADVERSE_LITIGATION, PENDING, UNKNOWN]
+  outcome_labels: [CONFIRMED_FAVORABLE, PROBABLE_FAVORABLE, ADVERSE_LITIGATION, PENDING, UNKNOWN, NOT_RELEVANT]
 
 lawyers: []
 seed_cases: []

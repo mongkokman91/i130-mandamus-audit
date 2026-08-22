@@ -266,13 +266,20 @@ def is_initiating_document(doc):
     description = " ".join(str(doc.get(k) or "") for k in (
         "entry_description", "description", "short_description"
     ))
-    return bool(re.search(
-        r"\b(?:amended\s+)?(?:civil\s+)?complaint\b|"
-        r"\bpetition\s+for\s+(?:a\s+)?writ\b|"
-        r"\binitiating\s+petition\b",
-        description,
-        re.I,
+    starts_as_pleading = bool(re.search(
+        r"^\s*(?:amended\s+)?(?:civil\s+)?complaint\b|"
+        r"^\s*(?:amended\s+)?petition\s+for\s+(?:a\s+)?writ\b|"
+        r"^\s*initiating\s+petition\b",
+        description, re.I,
     ))
+    first_document_pleading = (
+        str(doc.get("document_number") or "").strip() == "1"
+        and bool(re.search(
+            r"\b(?:civil\s+)?complaint\b|\bpetition\s+for\s+(?:a\s+)?writ\b",
+            description, re.I,
+        ))
+    )
+    return starts_as_pleading or first_document_pleading
 
 
 def outcome_context_is_nonhistorical(context):
@@ -444,12 +451,15 @@ def audit_case(s, row, patterns, max_documents=15):
     latest_explicit = explicit_outcomes[-1] if explicit_outcomes else (None, None, None, None)
     if not i130_pending_at_filing:
         latest_explicit = (None, None, None, None)
-    outcome, outcome_context = classify(
-        flags,
-        row.get("date_terminated"),
-        latest_explicit[1],
-        latest_explicit[3],
-    )
+    if i130_pending_at_filing:
+        outcome, outcome_context = classify(
+            flags,
+            row.get("date_terminated"),
+            latest_explicit[1],
+            latest_explicit[3],
+        )
+    else:
+        outcome, outcome_context = "NOT_RELEVANT", None
     result = {
         **row,
         "relationship_evidence": "spouse" if flags.get("spouse") else None,
@@ -522,7 +532,7 @@ def plaintiff_counsel_from_docket(s, docket_id):
     starters = []
     for d in docs:
         desc = " ".join(str(d.get(k) or "") for k in ("entry_description", "description", "short_description"))
-        if re.search(r"\b(complaint|petition for writ|petition|civil complaint)\b", desc, re.I):
+        if is_initiating_document(d):
             starters.append((d, desc))
     starters.sort(key=lambda x: (sortable_document_number(x[0].get("document_number")), str(x[0].get("entry_date") or "9999")))
     for d, desc in starters[:3]:
@@ -566,7 +576,7 @@ def discover(s, queries, max_pages, error_rows, max_dockets=None):
                 # Exact benefit-term searches define candidate recall.  Do not
                 # discard a hit merely because optional NOS/cause metadata is
                 # blank or miscoded.
-                if r.get("docket_id"):
+                if relevant(r) and r.get("docket_id"):
                     candidate = dict(r)
                     candidate["_discovery_cohort"] = cohort
                     current = dockets.get(str(r.get("docket_id")))
@@ -628,7 +638,7 @@ def seed_rows(cfg):
 def lawyer_stats(audited):
     by = defaultdict(list)
     for r in audited:
-        if r.get("lawyer"):
+        if r.get("lawyer") and r.get("i130_pending_at_filing"):
             by[r["lawyer"]].append(r)
     stats = []
     for lawyer, rows in by.items():
