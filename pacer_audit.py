@@ -358,10 +358,36 @@ def tier_case(row):
     return 4
 
 
-def audit_case(s, row, patterns):
+def select_audit_documents(docs, max_documents=15):
+    """Bound API work while retaining complaints and the newest later filings."""
+    if not max_documents or len(docs) <= max_documents:
+        return docs
+    initiating = [doc for doc in docs if is_initiating_document(doc)][:3]
+    initiating_ids = {str(doc.get("id") or id(doc)) for doc in initiating}
+    later = [
+        doc for doc in docs
+        if str(doc.get("id") or id(doc)) not in initiating_ids
+    ]
+    later.sort(
+        key=lambda doc: (
+            str(doc.get("entry_date") or ""),
+            sortable_document_number(doc.get("document_number")),
+        ),
+        reverse=True,
+    )
+    selected = initiating + later[:max(0, max_documents - len(initiating))]
+    selected.sort(key=lambda doc: (
+        str(doc.get("entry_date") or ""),
+        sortable_document_number(doc.get("document_number")),
+    ))
+    return selected
+
+
+def audit_case(s, row, patterns, max_documents=15):
     _, docs = docket_docs(s, int(row["docket_id"]))
+    docs_to_audit = select_audit_documents(docs, max_documents)
     combined, initiating_texts, evidence, explicit_outcomes = [], [], [], []
-    for d in docs:
+    for d in docs_to_audit:
         txt = document_text(s, d)
         if not txt:
             continue
@@ -426,6 +452,7 @@ def audit_case(s, row, patterns):
         "service_center_evidence": service,
         "service_center_context": service_context,
         "document_count": len(docs),
+        "documents_audited": len(docs_to_audit),
         "evidence_document_count": len(evidence),
         "outcome": outcome,
         "outcome_context": outcome_context,
@@ -689,6 +716,7 @@ def main():
     ap.add_argument("--output", default=DEFAULT_OUTPUT)
     ap.add_argument("--max-pages", type=int, default=10)
     ap.add_argument("--max-dockets", type=int, default=10)
+    ap.add_argument("--max-documents-per-docket", type=int, default=15)
     ap.add_argument("--cohort", choices=("maryland_primary", "canada_control"))
     args = ap.parse_args()
     out = Path(args.output)
@@ -722,7 +750,10 @@ def main():
     audited = []
     for i, r in enumerate(unique.values(), 1):
         try:
-            audited.append(audit_case(s, r, cfg.get("evidence_patterns", {})))
+            audited.append(audit_case(
+                s, r, cfg.get("evidence_patterns", {}),
+                args.max_documents_per_docket,
+            ))
             print(f"audit {i}/{len(unique)} {r['case_name']}")
         except Exception as exc:
             errors.append({"stage": "case_audit", "target": f"{r.get('case_name')} | {r.get('docket_id')}", "error": repr(exc), "traceback": traceback.format_exc(limit=3)})
@@ -748,7 +779,10 @@ def main():
     ]
     for i, row in enumerate(discovery_to_audit, 1):
         try:
-            audited.append(audit_case(s, row, cfg.get("evidence_patterns", {})))
+            audited.append(audit_case(
+                s, row, cfg.get("evidence_patterns", {}),
+                args.max_documents_per_docket,
+            ))
             print(f"focused audit {i}/{len(discovery_to_audit)} {row['case_name']}")
             checkpoint_outputs(
                 out, audited, discovery_ranking, discovery_cases,
