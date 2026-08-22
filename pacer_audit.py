@@ -213,6 +213,55 @@ def infer_service_center(text):
     return None, None
 
 
+def extract_venue_context(text):
+    """Extract the complaint paragraph that pleads federal venue."""
+    matches = list(re.finditer(
+        r"(?:28\s+U\.?S\.?C\.?\s*§?\s*1391|venue\s+is\s+proper|venue\s+lies)",
+        text,
+        re.I,
+    ))
+    if not matches:
+        return None
+    match = matches[0]
+    return re.sub(
+        r"\s+", " ",
+        text[max(0, match.start()-350):min(len(text), match.end()+850)],
+    ).strip()
+
+
+def infer_foreign_residence(text):
+    """Return a conservative foreign-residence flag, country, and context."""
+    patterns = (
+        r"(?:plaintiff|petitioner).{0,100}(?:resides|lives|resident).{0,60}"
+        r"(Canada|China|India|Pakistan|Mexico|United Kingdom|France|Germany|"
+        r"Turkey|Nigeria|Iran|Iraq|Afghanistan|United Arab Emirates)",
+        r"(?:resides|lives|resident)\s+(?:in|of)\s+"
+        r"(Canada|China|India|Pakistan|Mexico|United Kingdom|France|Germany|"
+        r"Turkey|Nigeria|Iran|Iraq|Afghanistan|United Arab Emirates)",
+        r"resides?\s+outside\s+(?:of\s+)?the\s+United\s+States",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I | re.S)
+        if match:
+            country = match.group(1) if match.lastindex else "Outside United States"
+            context = re.sub(
+                r"\s+", " ",
+                text[max(0, match.start()-220):min(len(text), match.end()+220)],
+            ).strip()
+            return True, country, context
+    return False, None, None
+
+
+def is_us_citizen_petitioner(text):
+    return bool(re.search(
+        r"(?:plaintiff|petitioner).{0,100}(?:is|was)\s+(?:a\s+)?"
+        r"(?:United States|U\.?S\.?)\s+citizen|"
+        r"(?:United States|U\.?S\.?)\s+citizen.{0,100}(?:plaintiff|petitioner)",
+        text,
+        re.I | re.S,
+    ))
+
+
 def is_initiating_document(doc):
     """Return True for complaints/petitions that cannot prove a later outcome."""
     description = " ".join(str(doc.get(k) or "") for k in (
@@ -296,14 +345,17 @@ def tier_case(row):
 
 def audit_case(s, row, patterns):
     _, docs = docket_docs(s, int(row["docket_id"]))
-    combined, evidence, explicit_outcomes = [], [], []
+    combined, initiating_texts, evidence, explicit_outcomes = [], [], [], []
     for d in docs:
         txt = document_text(s, d)
         if not txt:
             continue
         combined.append(txt)
+        initiating = is_initiating_document(d)
+        if initiating:
+            initiating_texts.append(txt)
         flags = evidence_flags(txt, patterns)
-        outcome_eligible = not is_initiating_document(d)
+        outcome_eligible = not initiating
         explicit_outcome, explicit_ctx = specific_i130_outcome(txt) if outcome_eligible else (None, None)
         if explicit_outcome:
             explicit_outcomes.append((d.get("entry_date") or "", explicit_outcome, explicit_ctx))
@@ -319,12 +371,17 @@ def audit_case(s, row, patterns):
                 "outcome_source_eligible": outcome_eligible,
             })
     text = "\n".join(combined)
+    complaint_text = "\n".join(initiating_texts)
     flags = evidence_flags(text, patterns)
     receipt, receipt_score, receipt_context = find_receipt_date(text, row.get("date_filed"))
     service, service_context = infer_service_center(text)
     filed = pd.to_datetime(row.get("date_filed"), errors="coerce", utc=True)
     rec = pd.to_datetime(receipt, errors="coerce", utc=True)
     delay = round((filed - rec).days / 30.4375, 1) if pd.notna(filed) and pd.notna(rec) else None
+    terminated = pd.to_datetime(row.get("date_terminated"), errors="coerce", utc=True)
+    days_to_termination = int((terminated - filed).days) if pd.notna(terminated) and pd.notna(filed) else None
+    venue_context = extract_venue_context(complaint_text)
+    foreign_resident, plaintiff_country, foreign_context = infer_foreign_residence(complaint_text)
     explicit_outcomes.sort(key=lambda item: item[0])
     latest_explicit = explicit_outcomes[-1] if explicit_outcomes else (None, None, None)
     outcome, outcome_context = classify(
@@ -342,12 +399,19 @@ def audit_case(s, row, patterns):
         "receipt_date_confidence_score": receipt_score,
         "receipt_date_context": receipt_context,
         "delay_months_extracted": delay,
+        "us_citizen_petitioner_evidence": is_us_citizen_petitioner(complaint_text),
+        "foreign_resident_plaintiff_evidence": foreign_resident,
+        "plaintiff_country": plaintiff_country,
+        "foreign_residence_context": foreign_context,
+        "alleged_venue_basis": venue_context,
         "service_center_evidence": service,
         "service_center_context": service_context,
         "document_count": len(docs),
         "evidence_document_count": len(evidence),
         "outcome": outcome,
         "outcome_context": outcome_context,
+        "explicit_post_filing_uscis_action": bool(latest_explicit[1]),
+        "days_lawsuit_to_termination": days_to_termination,
         "approval_language": outcome == "CONFIRMED_FAVORABLE",
         "adjudication_language": outcome == "CONFIRMED_FAVORABLE",
         "voluntary_dismissal_language": flags.get("voluntary_dismissal", False),
@@ -429,15 +493,17 @@ def discover(s, queries, max_pages, error_rows):
             continue
         if counsel and not looks_like_government_counsel(counsel):
             lawyer_counts[counsel] += 1
-            rows.append({
-                "lawyer": counsel,
-                "case_name": r.get("caseName"),
-                "docket_number": r.get("docketNumber"),
-                "court": r.get("court_citation_string"),
-                "docket_id": r.get("docket_id"),
+            case_row = norm(
+                counsel,
+                {"cohort": "focused_discovery"},
+                r,
+                source="focused_discovery",
+            )
+            case_row.update({
                 "counsel_side": "plaintiff_filing_counsel",
                 "counsel_source_description": source_desc,
             })
+            rows.append(case_row)
     ranking = [{"lawyer": k, "verified_plaintiff_filing_dockets": v} for k, v in lawyer_counts.most_common()]
     return rows, ranking, raw
 
@@ -489,10 +555,45 @@ def lawyer_stats(audited):
     return sorted(stats, key=lambda r: (-r["ranking_score"], -r["confirmed_favorable"], -r["tier1_cases"], -r["tier2_cases"]))
 
 
+def atomic_evidence_rows(audited):
+    rows = []
+    flag_names = (
+        "spouse", "i130", "pending", "approval", "adjudication",
+        "voluntary_dismissal", "adverse", "service_centers",
+    )
+    for case in audited:
+        try:
+            documents = json.loads(case.get("evidence_json") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            documents = []
+        for document in documents:
+            flags = set(filter(None, str(document.get("flags") or "").split(";")))
+            row = {
+                "docket_id": case.get("docket_id"),
+                "case_name": case.get("case_name"),
+                "lawyer": case.get("lawyer"),
+                "document_id": document.get("document_id"),
+                "document_number": document.get("document_number"),
+                "entry_date": document.get("entry_date"),
+                "description": document.get("description"),
+                "explicit_i130_outcome": document.get("explicit_i130_outcome"),
+                "explicit_i130_context": document.get("explicit_i130_context"),
+                "outcome_source_eligible": document.get("outcome_source_eligible"),
+            }
+            row.update({f"flag_{name}": name in flags for name in flag_names})
+            rows.append(row)
+    return rows
+
+
 def write_outputs(out, audited, discovery_ranking, discovery_cases, seeds, errors, raw):
     out.mkdir(parents=True, exist_ok=True)
+    atomic_cases = [
+        {key: value for key, value in case.items() if key != "evidence_json"}
+        for case in audited
+    ]
     frames = {
-        "Case Evidence": pd.DataFrame(audited),
+        "Case Evidence": pd.DataFrame(atomic_cases),
+        "Evidence Documents": pd.DataFrame(atomic_evidence_rows(audited)),
         "Lawyer Stats": pd.DataFrame(lawyer_stats(audited)),
         "Lawyer Discovery": pd.DataFrame(discovery_ranking),
         "Discovery Cases": pd.DataFrame(discovery_cases),
@@ -568,6 +669,24 @@ def main():
     except Exception as exc:
         errors.append({"stage": "discovery_fatal", "target": "all", "error": repr(exc), "traceback": traceback.format_exc(limit=3)})
         discovery_cases, discovery_ranking = [], []
+
+    known_dockets = {str(row.get("docket_id")) for row in audited}
+    discovery_to_audit = [
+        row for row in discovery_cases
+        if str(row.get("docket_id")) not in known_dockets
+    ]
+    for i, row in enumerate(discovery_to_audit, 1):
+        try:
+            audited.append(audit_case(s, row, cfg.get("evidence_patterns", {})))
+            print(f"focused audit {i}/{len(discovery_to_audit)} {row['case_name']}")
+        except Exception as exc:
+            errors.append({
+                "stage": "focused_case_audit",
+                "target": f"{row.get('case_name')} | {row.get('docket_id')}",
+                "error": repr(exc),
+                "traceback": traceback.format_exc(limit=3),
+            })
+            audited.append({**row, "outcome": "UNKNOWN", "tier": 4, "audit_error": repr(exc)})
 
     write_outputs(out, audited, discovery_ranking, discovery_cases, seed_rows(cfg), errors, raw)
     print("Done", out.resolve())
