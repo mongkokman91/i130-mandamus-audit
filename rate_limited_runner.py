@@ -16,9 +16,9 @@ import requests
 
 # CourtListener token limit observed for this project is 20 requests/minute.
 # Stay below the ceiling and retry throttled requests with bounded exponential backoff.
-_MIN_INTERVAL = 4.0
-_MAX_429_RETRIES = 1
-_MAX_RETRY_SLEEP = 65.0
+_MIN_INTERVAL = 5.0
+_MAX_429_RETRIES = 3
+_MAX_RETRY_SLEEP = 30.0
 _lock = threading.Lock()
 _last_request_at = 0.0
 _original_request = requests.Session.request
