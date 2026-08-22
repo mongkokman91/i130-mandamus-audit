@@ -1,8 +1,7 @@
 {
-  "run_id": 32553600426,
-  "run_attempt": 1,
-  "head_sha": "6eae3d33ed08ddc71745a58052fc6b282c07d99d",
-  "event_name": "push",
-  "workflow": "I-130 Mandamus Audit",
-  "repository": "mongkokman91/i130-mandamus-audit"
+  "run_id": 32556332650,
+  "head_sha": "cde54975a9d0fd52260faafb84dcabe6dd2648ba",
+  "tests": "success",
+  "maryland": "success",
+  "canada": "success"
 }
