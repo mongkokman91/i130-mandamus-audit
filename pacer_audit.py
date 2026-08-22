@@ -219,9 +219,9 @@ def is_initiating_document(doc):
         "entry_description", "description", "short_description"
     ))
     return bool(re.search(
-        r"\\b(?:amended\\s+)?(?:civil\\s+)?complaint\\b|"
-        r"\\bpetition\\s+for\\s+(?:a\\s+)?writ\\b|"
-        r"\\binitiating\\s+petition\\b",
+        r"\b(?:amended\s+)?(?:civil\s+)?complaint\b|"
+        r"\bpetition\s+for\s+(?:a\s+)?writ\b|"
+        r"\binitiating\s+petition\b",
         description,
         re.I,
     ))
@@ -230,13 +230,14 @@ def is_initiating_document(doc):
 def outcome_context_is_nonhistorical(context):
     """Reject requested, conditional, and failure-to-act language."""
     return bool(re.search(
-        r"\\b(?:if|when|once)\\s+(?:the\\s+)?(?:I[-\\s]?130|petition)?"
-        r".{0,60}(?:is|were|was|has been)?\\s*(?:approved|adjudicated)\\b|"
-        r"\\b(?:should|must|may|could|would)\\s+(?:be\\s+)?(?:approved|adjudicated)\\b|"
-        r"\\b(?:failure|failed|refusal|refused)\\s+to\\s+(?:approve|adjudicate)\\b|"
-        r"\\bright\\s+to\\s+have.{0,80}(?:approved|adjudicated)\\b|"
-        r"\\b(?:request(?:s|ed)?|seek(?:s|ing)?|pray(?:s|er)?|ask(?:s|ed)?|compel(?:ling)?)"
-        r".{0,100}(?:approve|adjudicate)\\b",
+        r"\b(?:if|when|once)\s+(?:approved|adjudicated)\b|"
+        r"\b(?:if|when|once)\s+(?:the\s+)?(?:I[-\s]?130|petition)?"
+        r".{0,60}(?:is|were|was|has been)?\s*(?:approved|adjudicated)\b|"
+        r"\b(?:should|must|may|could|would)\s+(?:be\s+)?(?:approved|adjudicated)\b|"
+        r"\b(?:failure|failed|refusal|refused)\s+to\s+(?:approve|adjudicate)\b|"
+        r"\bright\s+to\s+have.{0,80}(?:approved|adjudicated)\b|"
+        r"\b(?:request(?:s|ed)?|seek(?:s|ing)?|pray(?:s|er)?|ask(?:s|ed)?|compel(?:ling)?)"
+        r".{0,100}(?:approve|adjudicate)\b",
         context,
         re.I | re.S,
     ))
@@ -244,13 +245,13 @@ def outcome_context_is_nonhistorical(context):
 
 def specific_i130_outcome(text):
     favorable_patterns = [
-        r"(?:I[-\\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\\s*(?:approved|adjudicated)",
-        r"(?:approved|adjudicated).{0,180}(?:I[-\\s]?130|Petition for Alien Relative)",
-        r"USCIS.{0,120}(?:approved|adjudicated).{0,160}(?:plaintiff(?:'s|s)?\\s+)?(?:I[-\\s]?130|Petition for Alien Relative)",
+        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*(?:approved|adjudicated)",
+        r"(?:approved|adjudicated).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
+        r"USCIS.{0,120}(?:approved|adjudicated).{0,160}(?:plaintiff(?:'s|s)?\s+)?(?:I[-\s]?130|Petition for Alien Relative)",
     ]
     adverse_patterns = [
-        r"(?:I[-\\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is)?\\s*(?:denied|rejected)",
-        r"(?:denied|rejected).{0,180}(?:I[-\\s]?130|Petition for Alien Relative)",
+        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is)?\s*(?:denied|rejected)",
+        r"(?:denied|rejected).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
     ]
     for label, patterns in (
         ("CONFIRMED_FAVORABLE", favorable_patterns),
@@ -259,7 +260,7 @@ def specific_i130_outcome(text):
         for pattern in patterns:
             for match in re.finditer(pattern, text, re.I | re.S):
                 context = re.sub(
-                    r"\\s+", " ",
+                    r"\s+", " ",
                     text[max(0, match.start()-180):match.end()+180],
                 ).strip()
                 if not outcome_context_is_nonhistorical(context):
