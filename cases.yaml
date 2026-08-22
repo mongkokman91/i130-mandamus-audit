@@ -9,16 +9,13 @@ research_scope:
 
 lawyers: []
 
-# Focused, staged cohort: Maryland comparators first, then a small nationwide
-# Potomac/YSC and foreign-resident control. Every discovered docket is fully
-# audited after deduplication.
+# Bounded cohorts run as separate workflow jobs. Internal _cohort values are
+# removed before requests are sent to CourtListener.
 discovery_queries:
-  # Bounded primary cohort: recent D. Maryland I-130 filings.
-  - {filed_after: "2023-08-21", court: "mdd", q: '"I-130"'}
-  - {filed_after: "2023-08-21", court: "mdd", q: '"Petition for Alien Relative"'}
+  - {_cohort: "maryland_primary", filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130"'}
+  - {_cohort: "maryland_primary", filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"Petition for Alien Relative"'}
+  - {_cohort: "canada_control", filed_after: "2019-01-01", q: '"I-130" Canada mandamus'}
 
-  # One bounded foreign-resident control for the user's Canada venue facts.
-  - {filed_after: "2019-01-01", q: '"I-130" Canada mandamus'}
 evidence_patterns:
   spouse: ["husband", "wife", "spouse", "marriage", "married"]
   i130: ["i-130", "i130", "petition for alien relative"]
