@@ -292,6 +292,21 @@ def outcome_context_is_nonhistorical(context):
     ))
 
 
+def complaint_has_pending_i130(text):
+    """Require complaint-local proof that the I-130 itself was pending at filing."""
+    for ctx in contexts(text, r"\bI[-\s]?130\b|Petition for Alien Relative", radius=240):
+        if re.search(
+            r"\b(?:remains?|is|was|has been|still)\s+pending\b|"
+            r"\bpending\s+(?:with|before|at)\s+USCIS\b|"
+            r"\bnot\s+(?:yet\s+)?(?:adjudicated|approved|decided)\b|"
+            r"\bfail(?:ed|ure)?\s+to\s+(?:adjudicate|decide)\b",
+            ctx,
+            re.I,
+        ):
+            return True
+    return False
+
+
 def specific_i130_outcome(text):
     favorable_patterns = [
         r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*(?:approved|adjudicated)",
@@ -372,6 +387,7 @@ def audit_case(s, row, patterns):
             })
     text = "\n".join(combined)
     complaint_text = "\n".join(initiating_texts)
+    i130_pending_at_filing = complaint_has_pending_i130(complaint_text)
     flags = evidence_flags(text, patterns)
     receipt, receipt_score, receipt_context = find_receipt_date(text, row.get("date_filed"))
     service, service_context = infer_service_center(text)
@@ -384,6 +400,8 @@ def audit_case(s, row, patterns):
     foreign_resident, plaintiff_country, foreign_context = infer_foreign_residence(complaint_text)
     explicit_outcomes.sort(key=lambda item: item[0])
     latest_explicit = explicit_outcomes[-1] if explicit_outcomes else (None, None, None)
+    if not i130_pending_at_filing:
+        latest_explicit = (None, None, None)
     outcome, outcome_context = classify(
         flags,
         row.get("date_terminated"),
@@ -395,6 +413,7 @@ def audit_case(s, row, patterns):
         "relationship_evidence": "spouse" if flags.get("spouse") else None,
         "i130_evidence": flags.get("i130", False),
         "pending_language": flags.get("pending", False),
+        "i130_pending_at_filing": i130_pending_at_filing,
         "receipt_date_extracted": receipt,
         "receipt_date_confidence_score": receipt_score,
         "receipt_date_context": receipt_context,
@@ -473,6 +492,7 @@ def plaintiff_counsel_from_docket(s, docket_id):
 
 def discover(s, queries, max_pages, error_rows):
     dockets, raw = {}, []
+    failed_queries = 0
     for params in queries:
         try:
             rs, pages = search(s, params, max_pages)
@@ -481,8 +501,14 @@ def discover(s, queries, max_pages, error_rows):
                 if relevant(r) and r.get("docket_id"):
                     dockets.setdefault(str(r.get("docket_id")), r)
         except Exception as exc:
+            failed_queries += 1
             error_rows.append({"stage": "discovery", "target": json.dumps(params), "error": repr(exc)})
             raw.append({"params": params, "error": repr(exc), "pages": []})
+    if failed_queries:
+        raise RuntimeError(
+            f"{failed_queries} required discovery queries failed after retries; "
+            "rankings are intentionally suppressed."
+        )
     lawyer_counts = Counter()
     rows = []
     for r in dockets.values():
@@ -534,7 +560,12 @@ def lawyer_stats(audited):
         tier_counts = {t: sum(r.get("tier") == t for r in rows) for t in (1, 2, 3, 4)}
         ysc = sum(bool(r.get("potomac_ysc_bonus")) for r in rows)
         reliable_delay = sum(r.get("receipt_date_confidence_score") is not None and r.get("receipt_date_confidence_score") >= 8 for r in rows)
-        score = confirmed * 100 + tier_counts[1] * 30 + tier_counts[2] * 15 + tier_counts[3] * 5 + ysc * 10 - adverse * 40
+        favorable_rows = [r for r in rows if r.get("outcome") == "CONFIRMED_FAVORABLE"]
+        favorable_tier1 = sum(r.get("tier") == 1 for r in favorable_rows)
+        favorable_tier2 = sum(r.get("tier") == 2 for r in favorable_rows)
+        favorable_ysc = sum(bool(r.get("potomac_ysc_bonus")) for r in favorable_rows)
+        # Pending, probable, and unknown matters provide experience context only: zero score.
+        score = confirmed * 100 + favorable_tier1 * 30 + favorable_tier2 * 15 + favorable_ysc * 10 - adverse * 40
         stats.append({
             "lawyer": lawyer,
             "audited_cases": len(rows),
@@ -691,6 +722,13 @@ def main():
     write_outputs(out, audited, discovery_ranking, discovery_cases, seed_rows(cfg), errors, raw)
     print("Done", out.resolve())
     print("Errors captured:", len(errors))
+    required_search_failed = any(
+        row.get("stage") in {"discovery", "discovery_fatal"}
+        for row in errors
+    )
+    if required_search_failed:
+        print("INCOMPLETE: required discovery query failure; no ranking is decision-grade.")
+        return 1
     return 0
 
 
