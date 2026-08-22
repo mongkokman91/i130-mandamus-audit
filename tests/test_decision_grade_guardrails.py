@@ -1,6 +1,16 @@
+import tempfile
 import unittest
+from pathlib import Path
 
-from pacer_audit import complaint_has_pending_i130, lawyer_stats, load_config
+import pandas as pd
+
+from pacer_audit import (
+    checkpoint_outputs,
+    complaint_has_pending_i130,
+    lawyer_stats,
+    load_config,
+    prioritize_discovery_records,
+)
 
 
 class DecisionGradeGuardrailTests(unittest.TestCase):
@@ -38,6 +48,34 @@ class DecisionGradeGuardrailTests(unittest.TestCase):
         for query in queries:
             expected = "2023-08-21" if query.get("court") == "mdd" else "2019-01-01"
             self.assertEqual(query.get("filed_after"), expected)
+
+    def test_discovery_is_bounded_and_maryland_first(self):
+        records = [
+            {"docket_id": "c1", "dateFiled": "2026-08-01", "_discovery_cohort": "canada_control"},
+            {"docket_id": "m1", "dateFiled": "2025-01-01", "_discovery_cohort": "maryland_primary"},
+            {"docket_id": "m2", "dateFiled": "2026-01-01", "_discovery_cohort": "maryland_primary"},
+            {"docket_id": "c2", "dateFiled": "2026-07-01", "_discovery_cohort": "canada_control"},
+        ]
+        selected = prioritize_discovery_records(records, 3)
+        self.assertEqual([r["docket_id"] for r in selected], ["m2", "m1", "c1"])
+
+    def test_queries_are_split_into_explicit_cohorts(self):
+        queries = load_config("cases.yaml")["discovery_queries"]
+        cohorts = [q.get("_cohort") for q in queries]
+        self.assertEqual(cohorts.count("maryland_primary"), 2)
+        self.assertEqual(cohorts.count("canada_control"), 1)
+        self.assertNotIn(None, cohorts)
+
+    def test_checkpoint_writes_case_evidence_immediately(self):
+        case = {
+            "docket_id": "123", "case_name": "Checkpoint v. USCIS",
+            "lawyer": "Test Counsel", "outcome": "PENDING", "tier": 1,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_outputs(Path(tmp), [case], [], [], {"seed_cases": []}, [], {})
+            saved = pd.read_csv(Path(tmp) / "case_evidence.csv")
+            self.assertEqual(saved.loc[0, "docket_id"], 123)
+            self.assertEqual(saved.loc[0, "outcome"], "PENDING")
 
 
 if __name__ == "__main__":
