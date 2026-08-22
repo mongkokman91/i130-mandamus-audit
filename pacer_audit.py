@@ -13,6 +13,8 @@ SEARCH_BASE = "https://www.courtlistener.com/api/rest/v4"
 REST_BASE = "https://www.courtlistener.com/api/rest/v4"
 DEFAULT_CONFIG = "cases.yaml"
 DEFAULT_OUTPUT = "output"
+_DOCKET_DOC_CACHE = {}
+_DOCUMENT_TEXT_CACHE = {}
 
 
 def load_config(path):
@@ -102,7 +104,10 @@ def paged_endpoint(s, endpoint, params, max_pages=25):
 
 
 def docket_docs(s, docket_id):
-    entries = paged_endpoint(s, "docket-entries", {"docket": int(docket_id), "order_by": "date_filed"})
+    cache_key = int(docket_id)
+    if cache_key in _DOCKET_DOC_CACHE:
+        return _DOCKET_DOC_CACHE[cache_key]
+    entries = paged_endpoint(s, "docket-entries", {"docket": cache_key, "order_by": "date_filed"})
     docs = []
     for e in entries:
         for d in e.get("recap_documents") or []:
@@ -112,6 +117,7 @@ def docket_docs(s, docket_id):
                 "entry_description": e.get("description"),
                 **d,
             })
+    _DOCKET_DOC_CACHE[cache_key] = (entries, docs)
     return entries, docs
 
 
@@ -124,11 +130,14 @@ def document_text(s, doc):
         doc.get("plain_text") or "",
     ]
     if not doc.get("plain_text") and doc.get("id"):
-        try:
-            detail = api_get(s, f"{REST_BASE}/recap-documents/{doc['id']}/")
-            parts.append(detail.get("plain_text") or "")
-        except requests.RequestException:
-            pass
+        doc_id = int(doc["id"])
+        if doc_id not in _DOCUMENT_TEXT_CACHE:
+            try:
+                detail = api_get(s, f"{REST_BASE}/recap-documents/{doc_id}/")
+                _DOCUMENT_TEXT_CACHE[doc_id] = detail.get("plain_text") or ""
+            except requests.RequestException:
+                _DOCUMENT_TEXT_CACHE[doc_id] = ""
+        parts.append(_DOCUMENT_TEXT_CACHE[doc_id])
     return "\n".join(p for p in parts if p)
 
 
@@ -204,29 +213,61 @@ def infer_service_center(text):
     return None, None
 
 
+def is_initiating_document(doc):
+    """Return True for complaints/petitions that cannot prove a later outcome."""
+    description = " ".join(str(doc.get(k) or "") for k in (
+        "entry_description", "description", "short_description"
+    ))
+    return bool(re.search(
+        r"\\b(?:amended\\s+)?(?:civil\\s+)?complaint\\b|"
+        r"\\bpetition\\s+for\\s+(?:a\\s+)?writ\\b|"
+        r"\\binitiating\\s+petition\\b",
+        description,
+        re.I,
+    ))
+
+
+def outcome_context_is_nonhistorical(context):
+    """Reject requested, conditional, and failure-to-act language."""
+    return bool(re.search(
+        r"\\b(?:if|when|once)\\s+(?:the\\s+)?(?:I[-\\s]?130|petition)?"
+        r".{0,60}(?:is|were|was|has been)?\\s*(?:approved|adjudicated)\\b|"
+        r"\\b(?:should|must|may|could|would)\\s+(?:be\\s+)?(?:approved|adjudicated)\\b|"
+        r"\\b(?:failure|failed|refusal|refused)\\s+to\\s+(?:approve|adjudicate)\\b|"
+        r"\\bright\\s+to\\s+have.{0,80}(?:approved|adjudicated)\\b|"
+        r"\\b(?:request(?:s|ed)?|seek(?:s|ing)?|pray(?:s|er)?|ask(?:s|ed)?|compel(?:ling)?)"
+        r".{0,100}(?:approve|adjudicate)\\b",
+        context,
+        re.I | re.S,
+    ))
+
+
 def specific_i130_outcome(text):
     favorable_patterns = [
-        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*(?:approved|adjudicated)",
-        r"(?:approved|adjudicated).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
-        r"USCIS.{0,120}(?:approved|adjudicated).{0,160}(?:plaintiff(?:'s|s)?\s+)?(?:I[-\s]?130|Petition for Alien Relative)",
+        r"(?:I[-\\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\\s*(?:approved|adjudicated)",
+        r"(?:approved|adjudicated).{0,180}(?:I[-\\s]?130|Petition for Alien Relative)",
+        r"USCIS.{0,120}(?:approved|adjudicated).{0,160}(?:plaintiff(?:'s|s)?\\s+)?(?:I[-\\s]?130|Petition for Alien Relative)",
     ]
     adverse_patterns = [
-        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is)?\s*(?:denied|rejected)",
-        r"(?:denied|rejected).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
+        r"(?:I[-\\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is)?\\s*(?:denied|rejected)",
+        r"(?:denied|rejected).{0,180}(?:I[-\\s]?130|Petition for Alien Relative)",
     ]
-    for p in favorable_patterns:
-        m = re.search(p, text, re.I | re.S)
-        if m:
-            return "CONFIRMED_FAVORABLE", re.sub(r"\s+", " ", text[max(0,m.start()-120):m.end()+120]).strip()
-    for p in adverse_patterns:
-        m = re.search(p, text, re.I | re.S)
-        if m:
-            return "CONFIRMED_ADVERSE", re.sub(r"\s+", " ", text[max(0,m.start()-120):m.end()+120]).strip()
+    for label, patterns in (
+        ("CONFIRMED_FAVORABLE", favorable_patterns),
+        ("CONFIRMED_ADVERSE", adverse_patterns),
+    ):
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.I | re.S):
+                context = re.sub(
+                    r"\\s+", " ",
+                    text[max(0, match.start()-180):match.end()+180],
+                ).strip()
+                if not outcome_context_is_nonhistorical(context):
+                    return label, context
     return None, None
 
 
-def classify(text, flags, terminated):
-    explicit, context = specific_i130_outcome(text)
+def classify(flags, terminated, explicit=None, context=None):
     if explicit:
         return explicit, context
     if flags.get("adverse"):
@@ -254,14 +295,17 @@ def tier_case(row):
 
 def audit_case(s, row, patterns):
     _, docs = docket_docs(s, int(row["docket_id"]))
-    combined, evidence = [], []
+    combined, evidence, explicit_outcomes = [], [], []
     for d in docs:
         txt = document_text(s, d)
         if not txt:
             continue
         combined.append(txt)
         flags = evidence_flags(txt, patterns)
-        explicit_outcome, explicit_ctx = specific_i130_outcome(txt)
+        outcome_eligible = not is_initiating_document(d)
+        explicit_outcome, explicit_ctx = specific_i130_outcome(txt) if outcome_eligible else (None, None)
+        if explicit_outcome:
+            explicit_outcomes.append((d.get("entry_date") or "", explicit_outcome, explicit_ctx))
         if any(flags.values()) or explicit_outcome:
             evidence.append({
                 "document_id": d.get("id"),
@@ -271,6 +315,7 @@ def audit_case(s, row, patterns):
                 "flags": ";".join(k for k, v in flags.items() if v),
                 "explicit_i130_outcome": explicit_outcome,
                 "explicit_i130_context": explicit_ctx,
+                "outcome_source_eligible": outcome_eligible,
             })
     text = "\n".join(combined)
     flags = evidence_flags(text, patterns)
@@ -279,7 +324,14 @@ def audit_case(s, row, patterns):
     filed = pd.to_datetime(row.get("date_filed"), errors="coerce", utc=True)
     rec = pd.to_datetime(receipt, errors="coerce", utc=True)
     delay = round((filed - rec).days / 30.4375, 1) if pd.notna(filed) and pd.notna(rec) else None
-    outcome, outcome_context = classify(text, flags, row.get("date_terminated"))
+    explicit_outcomes.sort(key=lambda item: item[0])
+    latest_explicit = explicit_outcomes[-1] if explicit_outcomes else (None, None, None)
+    outcome, outcome_context = classify(
+        flags,
+        row.get("date_terminated"),
+        latest_explicit[1],
+        latest_explicit[2],
+    )
     result = {
         **row,
         "relationship_evidence": "spouse" if flags.get("spouse") else None,
@@ -311,9 +363,15 @@ def looks_like_government_counsel(name):
     blocked = (
         "ausa", "assistant united states attorney", "united states attorney", "u.s. attorney",
         "department of justice", "civil division", "office of immigration litigation",
-        "trial attorney", "government counsel", "us attorney", "doj"
+        "trial attorney", "government counsel", "us attorney", "doj",
+        "deputy clerk", "court staff", "law clerk", "case manager",
+        "courtroom deputy", "clerk of court"
     )
-    return any(x in lo for x in blocked)
+    if any(x in lo for x in blocked):
+        return True
+    normalized = re.sub(r"[^a-z ]", " ", lo)
+    tokens = [token for token in normalized.split() if token]
+    return bool(tokens) and all(len(token) <= 3 for token in tokens)
 
 
 def sortable_document_number(value):
