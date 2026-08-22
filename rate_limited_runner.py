@@ -15,7 +15,7 @@ import time
 import requests
 
 # CourtListener token limit observed for this project is 20 requests/minute.
-# Stay below the ceiling and retry a throttled request only once.
+# Stay below the ceiling and retry throttled requests with bounded exponential backoff.
 _MIN_INTERVAL = 4.0
 _MAX_429_RETRIES = 1
 _MAX_RETRY_SLEEP = 65.0
@@ -44,7 +44,7 @@ def _retry_seconds(response: requests.Response, attempt: int) -> float:
     match = re.search(r"available in\s+(\d+)\s+seconds", response.text or "", re.I)
     if match:
         return min(max(float(match.group(1)) + 1.0, 1.0), _MAX_RETRY_SLEEP)
-    return min(_MAX_RETRY_SLEEP, 5.0 * (attempt + 1))
+    return min(_MAX_RETRY_SLEEP, 5.0 * (2 ** attempt))
 
 
 def throttled_request(self, method, url, *args, **kwargs):
@@ -55,10 +55,10 @@ def throttled_request(self, method, url, *args, **kwargs):
         if response.status_code != 429:
             return response
         if attempt >= _MAX_429_RETRIES:
-            print("CourtListener rate limit persists; recording this request as an error and continuing.", flush=True)
+            print("CourtListener rate limit persisted after all retries; the required query will fail.", flush=True)
             return response
         delay = _retry_seconds(response, attempt)
-        print(f"CourtListener rate limit reached; one retry in {delay:.0f}s...", flush=True)
+        print(f"CourtListener rate limit reached; retry {attempt + 1}/{_MAX_429_RETRIES} in {delay:.0f}s...", flush=True)
         time.sleep(delay)
     return response
 
