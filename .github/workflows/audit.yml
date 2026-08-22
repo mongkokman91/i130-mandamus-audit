@@ -18,7 +18,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     env:
       COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
 
@@ -50,7 +50,7 @@ jobs:
         run: mkdir -p output
 
       - name: Run audit
-        run: python rate_limited_runner.py
+        run: python -u rate_limited_runner.py --max-pages 3
 
       - name: Upload audit results
         if: always()
