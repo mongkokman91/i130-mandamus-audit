@@ -3,8 +3,7 @@ name: I-130 Mandamus Audit
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
     paths-ignore:
       - 'run-meta/**'
 
@@ -16,64 +15,84 @@ permissions:
   contents: write
 
 jobs:
-  audit:
+  tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
-
+    timeout-minutes: 5
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
 
-      - name: Verify CourtListener secret is configured
-        shell: bash
-        run: |
-          if [ -z "$COURTLISTENER_API_KEY" ]; then
-            echo "COURTLISTENER_API_KEY is not configured in repository Actions secrets."
-            exit 1
-          fi
-
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
-
-      - name: Prepare output directory
-        run: mkdir -p output
-
-      - name: Run audit
-        run: python -u rate_limited_runner.py --max-pages 3
-
-      - name: Upload audit results
+  audit-maryland:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Verify CourtListener secret
+        run: test -n "$COURTLISTENER_API_KEY"
+      - name: Audit at most 10 recent Maryland dockets
+        run: python -u rate_limited_runner.py --cohort maryland_primary --max-pages 2 --max-dockets 10 --output output/maryland
+      - name: Upload Maryland checkpoints
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: i130-mandamus-audit-results
-          path: output/
+          name: i130-mandamus-audit-maryland
+          path: output/maryland/
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Publish run metadata
+  audit-canada:
+    needs: audit-maryland
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Audit at most 5 Canada-control dockets
+        run: python -u rate_limited_runner.py --cohort canada_control --max-pages 1 --max-dockets 5 --output output/canada
+      - name: Upload Canada checkpoints
         if: always()
-        shell: bash
+        uses: actions/upload-artifact@v4
+        with:
+          name: i130-mandamus-audit-canada
+          path: output/canada/
+          if-no-files-found: warn
+          retention-days: 30
+
+  metadata:
+    if: always()
+    needs: [tests, audit-maryland, audit-canada]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish run metadata
         run: |
           mkdir -p run-meta
           cat > run-meta/latest.json <<EOF
           {
             "run_id": ${{ github.run_id }},
-            "run_attempt": ${{ github.run_attempt }},
             "head_sha": "${{ github.sha }}",
-            "event_name": "${{ github.event_name }}",
-            "workflow": "${{ github.workflow }}",
-            "repository": "${{ github.repository }}"
+            "tests": "${{ needs.tests.result }}",
+            "maryland": "${{ needs.audit-maryland.result }}",
+            "canada": "${{ needs.audit-canada.result }}"
           }
           EOF
           git config user.name "github-actions[bot]"
