@@ -8,6 +8,10 @@ on:
     paths-ignore:
       - 'run-meta/**'
 
+concurrency:
+  group: i130-mandamus-audit
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
