@@ -10,6 +10,7 @@ from pacer_audit import (
     lawyer_stats,
     load_config,
     prioritize_discovery_records,
+    select_audit_documents,
 )
 
 
@@ -76,6 +77,23 @@ class DecisionGradeGuardrailTests(unittest.TestCase):
             saved = pd.read_csv(Path(tmp) / "case_evidence.csv")
             self.assertEqual(saved.loc[0, "docket_id"], 123)
             self.assertEqual(saved.loc[0, "outcome"], "PENDING")
+
+    def test_document_selection_keeps_complaint_and_newest_filings(self):
+        docs = [{
+            "id": 1, "entry_date": "2024-01-01", "document_number": "1",
+            "entry_description": "COMPLAINT for Writ of Mandamus",
+        }]
+        docs.extend({
+            "id": i, "entry_date": f"2024-02-{i:02d}",
+            "document_number": str(i), "entry_description": "Later filing",
+        } for i in range(2, 12))
+        selected = select_audit_documents(docs, 5)
+        self.assertEqual(len(selected), 5)
+        self.assertIn(1, [doc["id"] for doc in selected])
+        self.assertEqual(
+            sorted(doc["id"] for doc in selected if doc["id"] != 1),
+            [8, 9, 10, 11],
+        )
 
 
 if __name__ == "__main__":
