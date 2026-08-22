@@ -16,7 +16,7 @@ import requests
 
 # CourtListener token limit observed for this project is 20 requests/minute.
 # Stay below the ceiling and retry a throttled request only once.
-_MIN_INTERVAL = 3.5
+_MIN_INTERVAL = 4.0
 _MAX_429_RETRIES = 1
 _MAX_RETRY_SLEEP = 65.0
 _lock = threading.Lock()
