@@ -1,4 +1,4 @@
-version: 7
+version: 8
 research_scope:
   benefit: "Form I-130"
   focus: "pending spousal I-130 / APA / mandamus unreasonable-delay litigation"
@@ -14,23 +14,23 @@ lawyers: []
 # audited after deduplication.
 discovery_queries:
   # Primary D. Maryland spousal/family I-130 cohort
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130"'}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"Petition for Alien Relative"'}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" Potomac'}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" YSC'}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" "voluntary dismissal"'}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" approved adjudicated'}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" venue transfer'}
+  - {filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130"'}
+  - {filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"Petition for Alien Relative"'}
+  - {filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" Potomac'}
+  - {filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" YSC'}
+  - {filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" "voluntary dismissal"'}
+  - {filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" approved adjudicated'}
+  - {filed_after: "2023-08-21", court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" venue transfer'}
 
   # Small nationwide Potomac/YSC control
-  - {q: '"I-130" Potomac mandamus'}
-  - {q: '"I-130" YSC mandamus'}
-  - {q: '"Petition for Alien Relative" Potomac mandamus'}
+  - {filed_after: "2019-01-01", q: '"I-130" Potomac mandamus'}
+  - {filed_after: "2019-01-01", q: '"I-130" YSC mandamus'}
+  - {filed_after: "2019-01-01", q: '"Petition for Alien Relative" Potomac mandamus'}
 
   # Foreign-resident venue comparators
-  - {q: '"I-130" Canada mandamus'}
-  - {q: '"I-130" "resides in Canada" mandamus'}
-  - {q: '"I-130" "resides outside the United States" mandamus'}
+  - {filed_after: "2019-01-01", q: '"I-130" Canada mandamus'}
+  - {filed_after: "2019-01-01", q: '"I-130" "resides in Canada" mandamus'}
+  - {filed_after: "2019-01-01", q: '"I-130" "resides outside the United States" mandamus'}
 
 evidence_patterns:
   spouse: ["husband", "wife", "spouse", "marriage", "married"]
