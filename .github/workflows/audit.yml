@@ -43,7 +43,7 @@ jobs:
       - name: Verify CourtListener secret
         run: test -n "$COURTLISTENER_API_KEY"
       - name: Audit at most 10 recent Maryland dockets
-        run: python -u rate_limited_runner.py --cohort maryland_primary --max-pages 2 --max-dockets 10 --output output/maryland
+        run: python -u rate_limited_runner.py --cohort maryland_primary --max-pages 2 --max-dockets 10 --max-documents-per-docket 15 --output output/maryland
       - name: Upload Maryland checkpoints
         if: always()
         uses: actions/upload-artifact@v4
@@ -67,7 +67,7 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements.txt
       - name: Audit at most 5 Canada-control dockets
-        run: python -u rate_limited_runner.py --cohort canada_control --max-pages 1 --max-dockets 5 --output output/canada
+        run: python -u rate_limited_runner.py --cohort canada_control --max-pages 1 --max-dockets 5 --max-documents-per-docket 15 --output output/canada
       - name: Upload Canada checkpoints
         if: always()
         uses: actions/upload-artifact@v4
