@@ -1,4 +1,4 @@
-version: 6
+version: 7
 research_scope:
   benefit: "Form I-130"
   focus: "pending spousal I-130 / APA / mandamus unreasonable-delay litigation"
@@ -7,40 +7,30 @@ research_scope:
   service_center_hypothesis: "Potomac / YSC"
   outcome_labels: [CONFIRMED_FAVORABLE, PROBABLE_FAVORABLE, CONFIRMED_ADVERSE, PENDING, UNKNOWN]
 
-lawyers:
-  - name: "Hashim G. Jeelani"
-    search_params: {atty_name: "Hashim G. Jeelani", q: "I-130"}
-  - name: "Arif Gozel"
-    search_params: {atty_name: "Arif Gozel", q: "I-130"}
-  - name: "Benjamin G. Messer"
-    search_params: {atty_name: "Benjamin G. Messer", q: "I-130"}
-  - name: "Carley Tatman"
-    search_params: {atty_name: "Carley Tatman", q: "I-130"}
+lawyers: []
 
-# Discovery is deliberately Maryland-first, with nationwide Potomac/YSC and
-# foreign-resident controls. Query provenance is retained in raw_api.json.
+# Focused, staged cohort: Maryland comparators first, then a small nationwide
+# Potomac/YSC and foreign-resident control. Every discovered docket is fully
+# audited after deduplication.
 discovery_queries:
-  # Primary D. Maryland cohort
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "I-130"}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "Potomac"}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "YSC"}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"Voluntary Dismissal"'}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "approved adjudicated"}
-  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: "venue transfer"}
-  # Nationwide Potomac/YSC control cohort
+  # Primary D. Maryland spousal/family I-130 cohort
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130"'}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"Petition for Alien Relative"'}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" Potomac'}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" YSC'}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" "voluntary dismissal"'}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" approved adjudicated'}
+  - {court: "mdd", nature_of_suit: "465 Other Immigration Actions", cause: "Petition for Writ of Mandamus", q: '"I-130" venue transfer'}
+
+  # Small nationwide Potomac/YSC control
   - {q: '"I-130" Potomac mandamus'}
   - {q: '"I-130" YSC mandamus'}
   - {q: '"Petition for Alien Relative" Potomac mandamus'}
-  # Foreign-resident comparators
+
+  # Foreign-resident venue comparators
   - {q: '"I-130" Canada mandamus'}
   - {q: '"I-130" "resides in Canada" mandamus'}
   - {q: '"I-130" "resides outside the United States" mandamus'}
-  # Broad catch-all controls
-  - {q: "I-130 mandamus"}
-  - {q: '"I-130" "writ of mandamus"'}
-  - {q: '"I-130" "unreasonable delay"'}
-  - {q: '"Petition for Alien Relative" mandamus'}
-  - {q: '"I-130" USCIS mandamus'}
 
 evidence_patterns:
   spouse: ["husband", "wife", "spouse", "marriage", "married"]
