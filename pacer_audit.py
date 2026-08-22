@@ -132,11 +132,10 @@ def document_text(s, doc):
     if not doc.get("plain_text") and doc.get("id"):
         doc_id = int(doc["id"])
         if doc_id not in _DOCUMENT_TEXT_CACHE:
-            try:
-                detail = api_get(s, f"{REST_BASE}/recap-documents/{doc_id}/")
-                _DOCUMENT_TEXT_CACHE[doc_id] = detail.get("plain_text") or ""
-            except requests.RequestException:
-                _DOCUMENT_TEXT_CACHE[doc_id] = ""
+            # Missing text is legitimate; a failed API fetch is not.  Let the
+            # caller record the failure so coverage cannot be certified.
+            detail = api_get(s, f"{REST_BASE}/recap-documents/{doc_id}/")
+            _DOCUMENT_TEXT_CACHE[doc_id] = detail.get("plain_text") or ""
         parts.append(_DOCUMENT_TEXT_CACHE[doc_id])
     return "\n".join(p for p in parts if p)
 
@@ -346,8 +345,8 @@ def specific_i130_outcome(text):
 def classify(flags, terminated, explicit=None, context=None):
     if explicit:
         return explicit, context
-    if flags.get("adverse"):
-        return "UNKNOWN", None
+    if flags.get("adverse") and terminated:
+        return "ADVERSE_LITIGATION", None
     if flags.get("voluntary_dismissal") and terminated:
         return "PROBABLE_FAVORABLE", None
     if not terminated:
@@ -593,7 +592,7 @@ def discover(s, queries, max_pages, error_rows, max_dockets=None):
             counsel, source_desc = plaintiff_counsel_from_docket(s, r.get("docket_id"))
         except Exception as exc:
             error_rows.append({"stage": "discovery_docket", "target": str(r.get("docket_id")), "error": repr(exc)})
-            continue
+            counsel, source_desc = None, None
         if counsel and not looks_like_government_counsel(counsel):
             lawyer_counts[counsel] += 1
         else:

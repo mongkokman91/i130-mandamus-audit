@@ -55,6 +55,10 @@ class OutcomeClassificationTests(unittest.TestCase):
         outcome, _ = classify({"voluntary_dismissal": True}, "2026-06-05")
         self.assertEqual(outcome, "PROBABLE_FAVORABLE")
 
+    def test_court_dismissal_is_adverse_litigation(self):
+        outcome, _ = classify({"adverse": True}, "2026-06-05")
+        self.assertEqual(outcome, "ADVERSE_LITIGATION")
+
     def test_venue_context_comes_from_pleading(self):
         text = (
             "Plaintiffs reside in Canada. Venue is proper in this District "
