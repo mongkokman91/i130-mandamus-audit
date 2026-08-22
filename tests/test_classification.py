@@ -2,6 +2,9 @@ import unittest
 
 from pacer_audit import (
     classify,
+    extract_venue_context,
+    infer_foreign_residence,
+    is_us_citizen_petitioner,
     is_initiating_document,
     looks_like_government_counsel,
     specific_i130_outcome,
@@ -42,6 +45,27 @@ class OutcomeClassificationTests(unittest.TestCase):
     def test_voluntary_dismissal_remains_probable(self):
         outcome, _ = classify({"voluntary_dismissal": True}, "2026-06-05")
         self.assertEqual(outcome, "PROBABLE_FAVORABLE")
+
+    def test_venue_context_comes_from_pleading(self):
+        text = (
+            "Plaintiffs reside in Canada. Venue is proper in this District "
+            "under 28 U.S.C. section 1391(e)(1)(A)."
+        )
+        context = extract_venue_context(text)
+        self.assertIn("1391", context)
+
+    def test_canada_residence_is_extracted(self):
+        found, country, context = infer_foreign_residence(
+            "Plaintiff is a U.S. citizen and resides in Canada with his spouse."
+        )
+        self.assertTrue(found)
+        self.assertEqual(country, "Canada")
+        self.assertIn("Canada", context)
+
+    def test_us_citizen_petitioner_is_extracted(self):
+        self.assertTrue(is_us_citizen_petitioner(
+            "Plaintiff is a United States citizen and petitioner for his wife."
+        ))
 
     def test_court_staff_names_are_excluded(self):
         for name in ("KNS, Deputy Clerk", "Court Staff", "Courtroom Deputy", "bas"):
