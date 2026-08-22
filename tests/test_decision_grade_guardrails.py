@@ -26,8 +26,7 @@ class DecisionGradeGuardrailTests(unittest.TestCase):
         stats = lawyer_stats(rows)[0]
         self.assertEqual(stats["confirmed_favorable"], 0)
         self.assertEqual(stats["pending"], 1)
-        self.assertEqual(stats["ranking_score"], 0)
-        self.assertIsNone(stats["confirmed_win_rate"])
+        self.assertEqual(stats["experience_evidence_score_not_success_rate"], 0)
 
     def test_already_approved_i130_is_not_pending_at_filing(self):
         text = (
@@ -43,28 +42,27 @@ class DecisionGradeGuardrailTests(unittest.TestCase):
         )
         self.assertTrue(complaint_has_pending_i130(text))
 
-    def test_every_discovery_query_has_expected_date_window(self):
-        queries = load_config("cases.yaml")["discovery_queries"]
-        self.assertTrue(queries)
-        for query in queries:
-            expected = "2023-08-21" if query.get("court") == "mdd" else "2019-01-01"
-            self.assertEqual(query.get("filed_after"), expected)
+    def test_maryland_census_spans_a_decade_without_nos_or_cause_filters(self):
+        queries = load_config("maryland_census.yaml")["discovery_queries"]
+        md = [query for query in queries if query.get("court") == "mdd"]
+        self.assertEqual(min(q["filed_after"] for q in md), "2016-08-01")
+        self.assertTrue(all("nature_of_suit" not in q and "cause" not in q for q in md))
 
     def test_discovery_is_bounded_and_maryland_first(self):
         records = [
             {"docket_id": "c1", "dateFiled": "2026-08-01", "_discovery_cohort": "canada_control"},
-            {"docket_id": "m1", "dateFiled": "2025-01-01", "_discovery_cohort": "maryland_primary"},
-            {"docket_id": "m2", "dateFiled": "2026-01-01", "_discovery_cohort": "maryland_primary"},
+            {"docket_id": "m1", "dateFiled": "2025-01-01", "_discovery_cohort": "md_2024_2025"},
+            {"docket_id": "m2", "dateFiled": "2026-01-01", "_discovery_cohort": "md_2026"},
             {"docket_id": "c2", "dateFiled": "2026-07-01", "_discovery_cohort": "canada_control"},
         ]
         selected = prioritize_discovery_records(records, 3)
         self.assertEqual([r["docket_id"] for r in selected], ["m2", "m1", "c1"])
 
     def test_queries_are_split_into_explicit_cohorts(self):
-        queries = load_config("cases.yaml")["discovery_queries"]
+        queries = load_config("maryland_census.yaml")["discovery_queries"]
         cohorts = [q.get("_cohort") for q in queries]
-        self.assertEqual(cohorts.count("maryland_primary"), 2)
-        self.assertEqual(cohorts.count("canada_control"), 1)
+        self.assertEqual(sum(str(c).startswith("md_") for c in cohorts), 20)
+        self.assertEqual(cohorts.count("canada_control"), 0)
         self.assertNotIn(None, cohorts)
 
     def test_checkpoint_writes_case_evidence_immediately(self):

@@ -1,0 +1,42 @@
+version: 1
+research_scope:
+  benefit: "Form I-130"
+  focus: "D. Maryland I-130 / APA / mandamus delay litigation"
+  date_range: ["2016-08-01", "present"]
+  outcome_labels: [CONFIRMED_FAVORABLE, PROBABLE_FAVORABLE, ADVERSE_LITIGATION, PENDING, UNKNOWN]
+
+lawyers: []
+seed_cases: []
+
+# Recall-oriented date shards. Metadata codes are intentionally not filters.
+discovery_queries:
+  - {_cohort: "md_2016_2018", filed_after: "2016-08-01", filed_before: "2018-12-31", court: "mdd", q: '"I-130"'}
+  - {_cohort: "md_2016_2018", filed_after: "2016-08-01", filed_before: "2018-12-31", court: "mdd", q: '"Petition for Alien Relative"'}
+  - {_cohort: "md_2016_2018", filed_after: "2016-08-01", filed_before: "2018-12-31", court: "mdd", q: 'I130'}
+  - {_cohort: "md_2016_2018", filed_after: "2016-08-01", filed_before: "2018-12-31", court: "mdd", q: '"alien relative petition"'}
+  - {_cohort: "md_2019_2021", filed_after: "2019-01-01", filed_before: "2021-12-31", court: "mdd", q: '"I-130"'}
+  - {_cohort: "md_2019_2021", filed_after: "2019-01-01", filed_before: "2021-12-31", court: "mdd", q: '"Petition for Alien Relative"'}
+  - {_cohort: "md_2019_2021", filed_after: "2019-01-01", filed_before: "2021-12-31", court: "mdd", q: 'I130'}
+  - {_cohort: "md_2019_2021", filed_after: "2019-01-01", filed_before: "2021-12-31", court: "mdd", q: '"alien relative petition"'}
+  - {_cohort: "md_2022_2023", filed_after: "2022-01-01", filed_before: "2023-12-31", court: "mdd", q: '"I-130"'}
+  - {_cohort: "md_2022_2023", filed_after: "2022-01-01", filed_before: "2023-12-31", court: "mdd", q: '"Petition for Alien Relative"'}
+  - {_cohort: "md_2022_2023", filed_after: "2022-01-01", filed_before: "2023-12-31", court: "mdd", q: 'I130'}
+  - {_cohort: "md_2022_2023", filed_after: "2022-01-01", filed_before: "2023-12-31", court: "mdd", q: '"alien relative petition"'}
+  - {_cohort: "md_2024_2025", filed_after: "2024-01-01", filed_before: "2025-12-31", court: "mdd", q: '"I-130"'}
+  - {_cohort: "md_2024_2025", filed_after: "2024-01-01", filed_before: "2025-12-31", court: "mdd", q: '"Petition for Alien Relative"'}
+  - {_cohort: "md_2024_2025", filed_after: "2024-01-01", filed_before: "2025-12-31", court: "mdd", q: 'I130'}
+  - {_cohort: "md_2024_2025", filed_after: "2024-01-01", filed_before: "2025-12-31", court: "mdd", q: '"alien relative petition"'}
+  - {_cohort: "md_2026", filed_after: "2026-01-01", court: "mdd", q: '"I-130"'}
+  - {_cohort: "md_2026", filed_after: "2026-01-01", court: "mdd", q: '"Petition for Alien Relative"'}
+  - {_cohort: "md_2026", filed_after: "2026-01-01", court: "mdd", q: 'I130'}
+  - {_cohort: "md_2026", filed_after: "2026-01-01", court: "mdd", q: '"alien relative petition"'}
+
+evidence_patterns:
+  spouse: ["husband", "wife", "spouse", "marriage", "married"]
+  i130: ["i-130", "i130", "petition for alien relative"]
+  pending: ["remains pending", "still pending", "has been pending", "pending with uscis"]
+  approval: ["i-130 was approved", "i-130 has been approved", "petition was approved", "petition has been approved", "uscis approved"]
+  adjudication: ["uscis adjudicated", "petition was adjudicated", "petition has been adjudicated", "agency adjudicated"]
+  voluntary_dismissal: ["voluntary dismissal", "notice of dismissal", "stipulation of dismissal", "stipulated dismissal"]
+  adverse: ["motion to dismiss granted", "case dismissed with prejudice", "petition denied", "complaint dismissed"]
+  service_centers: ["potomac", "ysc", "nebraska", "lin", "texas", "src", "vermont", "eac", "california", "wac", "national benefits center", "msc"]

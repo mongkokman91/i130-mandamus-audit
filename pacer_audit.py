@@ -308,19 +308,30 @@ def complaint_has_pending_i130(text):
 
 
 def specific_i130_outcome(text):
-    favorable_patterns = [
-        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*(?:approved|adjudicated)",
-        r"(?:approved|adjudicated).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
-        r"USCIS.{0,120}(?:approved|adjudicated).{0,160}(?:plaintiff(?:'s|s)?\s+)?(?:I[-\s]?130|Petition for Alien Relative)",
-    ]
-    adverse_patterns = [
-        r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is)?\s*(?:denied|rejected)",
-        r"(?:denied|rejected).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
-    ]
-    for label, patterns in (
-        ("CONFIRMED_FAVORABLE", favorable_patterns),
-        ("CONFIRMED_ADVERSE", adverse_patterns),
-    ):
+    """Return mandamus outcome, benefit decision, and local evidence context.
+
+    Mandamus seeks a decision, not a particular merits result.  A documented
+    post-filing I-130 approval *or denial* therefore confirms adjudication.
+    The benefit decision is retained separately so it cannot be mistaken for
+    litigation success or failure.
+    """
+    patterns_by_decision = (
+        ("APPROVED", [
+            r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*approved",
+            r"approved.{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
+            r"USCIS.{0,120}approved.{0,160}(?:plaintiff(?:'s|s)?\s+)?(?:I[-\s]?130|Petition for Alien Relative)",
+        ]),
+        ("DENIED", [
+            r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is)?\s*(?:denied|rejected)",
+            r"(?:denied|rejected).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
+        ]),
+        ("ADJUDICATED_UNSPECIFIED", [
+            r"(?:I[-\s]?130|Petition for Alien Relative).{0,180}(?:was|has been|is|were)?\s*(?:adjudicated|decided)",
+            r"(?:adjudicated|decided).{0,180}(?:I[-\s]?130|Petition for Alien Relative)",
+            r"USCIS.{0,120}(?:adjudicated|decided).{0,160}(?:plaintiff(?:'s|s)?\s+)?(?:I[-\s]?130|Petition for Alien Relative)",
+        ]),
+    )
+    for benefit_decision, patterns in patterns_by_decision:
         for pattern in patterns:
             for match in re.finditer(pattern, text, re.I | re.S):
                 context = re.sub(
@@ -328,8 +339,8 @@ def specific_i130_outcome(text):
                     text[max(0, match.start()-180):match.end()+180],
                 ).strip()
                 if not outcome_context_is_nonhistorical(context):
-                    return label, context
-    return None, None
+                    return "CONFIRMED_FAVORABLE", benefit_decision, context
+    return None, None, None
 
 
 def classify(flags, terminated, explicit=None, context=None):
@@ -397,9 +408,14 @@ def audit_case(s, row, patterns, max_documents=15):
             initiating_texts.append(txt)
         flags = evidence_flags(txt, patterns)
         outcome_eligible = not initiating
-        explicit_outcome, explicit_ctx = specific_i130_outcome(txt) if outcome_eligible else (None, None)
+        explicit_outcome, benefit_decision, explicit_ctx = (
+            specific_i130_outcome(txt) if outcome_eligible else (None, None, None)
+        )
         if explicit_outcome:
-            explicit_outcomes.append((d.get("entry_date") or "", explicit_outcome, explicit_ctx))
+            explicit_outcomes.append((
+                d.get("entry_date") or "", explicit_outcome,
+                benefit_decision, explicit_ctx,
+            ))
         if any(flags.values()) or explicit_outcome:
             evidence.append({
                 "document_id": d.get("id"),
@@ -408,6 +424,7 @@ def audit_case(s, row, patterns, max_documents=15):
                 "description": d.get("description") or d.get("short_description"),
                 "flags": ";".join(k for k, v in flags.items() if v),
                 "explicit_i130_outcome": explicit_outcome,
+                "benefit_decision": benefit_decision,
                 "explicit_i130_context": explicit_ctx,
                 "outcome_source_eligible": outcome_eligible,
             })
@@ -425,14 +442,14 @@ def audit_case(s, row, patterns, max_documents=15):
     venue_context = extract_venue_context(complaint_text)
     foreign_resident, plaintiff_country, foreign_context = infer_foreign_residence(complaint_text)
     explicit_outcomes.sort(key=lambda item: item[0])
-    latest_explicit = explicit_outcomes[-1] if explicit_outcomes else (None, None, None)
+    latest_explicit = explicit_outcomes[-1] if explicit_outcomes else (None, None, None, None)
     if not i130_pending_at_filing:
-        latest_explicit = (None, None, None)
+        latest_explicit = (None, None, None, None)
     outcome, outcome_context = classify(
         flags,
         row.get("date_terminated"),
         latest_explicit[1],
-        latest_explicit[2],
+        latest_explicit[3],
     )
     result = {
         **row,
@@ -456,9 +473,11 @@ def audit_case(s, row, patterns, max_documents=15):
         "evidence_document_count": len(evidence),
         "outcome": outcome,
         "outcome_context": outcome_context,
+        "benefit_decision": latest_explicit[2],
+        "benefit_decision_context": latest_explicit[3],
         "explicit_post_filing_uscis_action": bool(latest_explicit[1]),
         "days_lawsuit_to_termination": days_to_termination,
-        "approval_language": outcome == "CONFIRMED_FAVORABLE",
+        "approval_language": latest_explicit[2] == "APPROVED",
         "adjudication_language": outcome == "CONFIRMED_FAVORABLE",
         "voluntary_dismissal_language": flags.get("voluntary_dismissal", False),
         "adverse_language": flags.get("adverse", False),
@@ -521,7 +540,7 @@ def prioritize_discovery_records(records, max_dockets):
     """Prefer recent Maryland cases, then bounded controls."""
     def key(record):
         cohort = record.get("_discovery_cohort") or ""
-        priority = 0 if cohort == "maryland_primary" else 1
+        priority = 0 if cohort.startswith("md_") else 1
         filed = pd.to_datetime(record.get("dateFiled"), errors="coerce")
         filed_rank = -filed.value if pd.notna(filed) else 0
         return (priority, filed_rank, str(record.get("docket_id") or ""))
@@ -537,21 +556,31 @@ def discover(s, queries, max_pages, error_rows, max_dockets=None):
         search_params = {k: v for k, v in params.items() if not k.startswith("_")}
         try:
             rs, pages = search(s, search_params, max_pages)
-            raw.append({"params": params, "count": len(rs), "pages": pages})
+            raw.append({
+                "params": params,
+                "count": len(rs),
+                "page_count": len(pages),
+                "truncated_at_page_limit": bool(pages and pages[-1].get("next")),
+                "pages": pages,
+            })
             for r in dedupe(rs):
-                if relevant(r) and r.get("docket_id"):
+                # Exact benefit-term searches define candidate recall.  Do not
+                # discard a hit merely because optional NOS/cause metadata is
+                # blank or miscoded.
+                if r.get("docket_id"):
                     candidate = dict(r)
                     candidate["_discovery_cohort"] = cohort
                     current = dockets.get(str(r.get("docket_id")))
                     if current is None or (
-                        cohort == "maryland_primary"
-                        and current.get("_discovery_cohort") != "maryland_primary"
+                        cohort.startswith("md_")
+                        and not str(current.get("_discovery_cohort") or "").startswith("md_")
                     ):
                         dockets[str(r.get("docket_id"))] = candidate
         except Exception as exc:
             failed_queries += 1
             error_rows.append({"stage": "discovery", "target": json.dumps(params), "error": repr(exc)})
-            raw.append({"params": params, "error": repr(exc), "pages": []})
+            raw.append({"params": params, "error": repr(exc), "page_count": 0,
+                        "truncated_at_page_limit": False, "pages": []})
     if failed_queries:
         raise RuntimeError(
             f"{failed_queries} required discovery queries failed after retries; "
@@ -567,18 +596,21 @@ def discover(s, queries, max_pages, error_rows, max_dockets=None):
             continue
         if counsel and not looks_like_government_counsel(counsel):
             lawyer_counts[counsel] += 1
-            case_row = norm(
-                counsel,
-                {"cohort": "focused_discovery"},
-                r,
-                source="focused_discovery",
-            )
-            case_row.update({
-                "discovery_cohort": r.get("_discovery_cohort"),
-                "counsel_side": "plaintiff_filing_counsel",
-                "counsel_source_description": source_desc,
-            })
-            rows.append(case_row)
+        else:
+            counsel = None
+        # Counsel extraction quality must never control case inclusion.
+        case_row = norm(
+            counsel,
+            {"cohort": "focused_discovery"},
+            r,
+            source="focused_discovery",
+        )
+        case_row.update({
+            "discovery_cohort": r.get("_discovery_cohort"),
+            "counsel_side": "plaintiff_filing_counsel" if counsel else "unresolved",
+            "counsel_source_description": source_desc,
+        })
+        rows.append(case_row)
     ranking = [{"lawyer": k, "verified_plaintiff_filing_dockets": v} for k, v in lawyer_counts.most_common()]
     return rows, ranking, raw
 
@@ -602,7 +634,7 @@ def lawyer_stats(audited):
     stats = []
     for lawyer, rows in by.items():
         confirmed = sum(r.get("outcome") == "CONFIRMED_FAVORABLE" for r in rows)
-        adverse = sum(r.get("outcome") == "CONFIRMED_ADVERSE" for r in rows)
+        adverse = sum(r.get("outcome") == "ADVERSE_LITIGATION" for r in rows)
         probable = sum(r.get("outcome") == "PROBABLE_FAVORABLE" for r in rows)
         pending = sum(r.get("outcome") == "PENDING" for r in rows)
         unknown = sum(r.get("outcome") == "UNKNOWN" for r in rows)
@@ -613,14 +645,20 @@ def lawyer_stats(audited):
         favorable_tier1 = sum(r.get("tier") == 1 for r in favorable_rows)
         favorable_tier2 = sum(r.get("tier") == 2 for r in favorable_rows)
         favorable_ysc = sum(bool(r.get("potomac_ysc_bonus")) for r in favorable_rows)
-        # Pending, probable, and unknown matters provide experience context only: zero score.
+        approved = sum(r.get("benefit_decision") == "APPROVED" for r in rows)
+        denied = sum(r.get("benefit_decision") == "DENIED" for r in rows)
+        unspecified = sum(r.get("benefit_decision") == "ADJUDICATED_UNSPECIFIED" for r in rows)
+        # This is an experience-evidence score, never a success rate.
         score = confirmed * 100 + favorable_tier1 * 30 + favorable_tier2 * 15 + favorable_ysc * 10 - adverse * 40
         stats.append({
             "lawyer": lawyer,
             "audited_cases": len(rows),
             "confirmed_favorable": confirmed,
             "probable_favorable_not_counted_as_win": probable,
-            "confirmed_adverse": adverse,
+            "adverse_litigation": adverse,
+            "approved_i130": approved,
+            "denied_i130": denied,
+            "adjudicated_result_unspecified": unspecified,
             "pending": pending,
             "unknown": unknown,
             "tier1_cases": tier_counts[1],
@@ -629,10 +667,9 @@ def lawyer_stats(audited):
             "tier4_cases": tier_counts[4],
             "potomac_ysc_cases": ysc,
             "high_confidence_receipt_dates": reliable_delay,
-            "confirmed_win_rate": round(confirmed / (confirmed + adverse), 3) if confirmed + adverse else None,
-            "ranking_score": score,
+            "experience_evidence_score_not_success_rate": score,
         })
-    return sorted(stats, key=lambda r: (-r["ranking_score"], -r["confirmed_favorable"], -r["tier1_cases"], -r["tier2_cases"]))
+    return sorted(stats, key=lambda r: (-r["experience_evidence_score_not_success_rate"], -r["confirmed_favorable"], -r["tier1_cases"], -r["tier2_cases"]))
 
 
 def atomic_evidence_rows(audited):
@@ -657,6 +694,7 @@ def atomic_evidence_rows(audited):
                 "entry_date": document.get("entry_date"),
                 "description": document.get("description"),
                 "explicit_i130_outcome": document.get("explicit_i130_outcome"),
+                "benefit_decision": document.get("benefit_decision"),
                 "explicit_i130_context": document.get("explicit_i130_context"),
                 "outcome_source_eligible": document.get("outcome_source_eligible"),
             }
@@ -690,9 +728,10 @@ def write_outputs(out, audited, discovery_ranking, discovery_cases, seeds, error
             ["Tier 2", "Spousal pending I-130 at any delay length."],
             ["Tier 3", "Other pending family I-130."],
             ["Tier 4", "Broader immigration/USCIS delay litigation."],
-            ["CONFIRMED_FAVORABLE", "Requires explicit I-130/Petition for Alien Relative approval or adjudication language in local context."],
+            ["CONFIRMED_FAVORABLE", "Requires explicit post-filing I-130 adjudication language. Approval and denial both satisfy the mandamus objective; the merits decision is separate."],
             ["PROBABLE_FAVORABLE", "Voluntary/stipulated dismissal only; NOT counted as a confirmed win."],
-            ["CONFIRMED_ADVERSE", "Requires explicit I-130/Petition for Alien Relative denial/rejection language."],
+            ["ADVERSE_LITIGATION", "Court dismissal or merits loss without documented post-filing I-130 adjudication."],
+            ["Benefit decision", "APPROVED, DENIED, or ADJUDICATED_UNSPECIFIED; never used as a proxy for litigation success."],
             ["Receipt date", "Extracted only from I-130-specific filing/receipt context; generic petition dates are excluded."],
             ["Service center", "Accepted only from I-130/receipt-local context, including receipt-prefix evidence."],
             ["Lawyer discovery", "Counts plaintiff filing counsel inferred from the initiating complaint/petition description; government-side indexed counsel are not counted."],
@@ -717,7 +756,7 @@ def main():
     ap.add_argument("--max-pages", type=int, default=10)
     ap.add_argument("--max-dockets", type=int, default=10)
     ap.add_argument("--max-documents-per-docket", type=int, default=15)
-    ap.add_argument("--cohort", choices=("maryland_primary", "canada_control"))
+    ap.add_argument("--cohort")
     args = ap.parse_args()
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)

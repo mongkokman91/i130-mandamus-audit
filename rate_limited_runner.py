@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Run pacer_audit.py while respecting CourtListener's API throttle.
-
-A persistent 429 must return control to the audit quickly so its normal
-per-query error handling can preserve partial output instead of allowing the
-GitHub job to time out.
-"""
+"""Run the audit with conservative, bounded CourtListener retry behavior."""
 from __future__ import annotations
 
+import random
 import re
 import runpy
 import threading
@@ -14,11 +10,9 @@ import time
 
 import requests
 
-# CourtListener token limit observed for this project is 20 requests/minute.
-# Stay below the ceiling and retry throttled requests with bounded exponential backoff.
 _MIN_INTERVAL = 5.0
-_MAX_429_RETRIES = 3
-_MAX_RETRY_SLEEP = 30.0
+_MAX_429_RETRIES = 8
+_MAX_RETRY_SLEEP = 180.0
 _lock = threading.Lock()
 _last_request_at = 0.0
 _original_request = requests.Session.request
@@ -38,13 +32,13 @@ def _retry_seconds(response: requests.Response, attempt: int) -> float:
     header = response.headers.get("Retry-After")
     if header:
         try:
-            return min(max(float(header), 1.0), _MAX_RETRY_SLEEP)
+            base = float(header)
         except ValueError:
-            pass
-    match = re.search(r"available in\s+(\d+)\s+seconds", response.text or "", re.I)
-    if match:
-        return min(max(float(match.group(1)) + 1.0, 1.0), _MAX_RETRY_SLEEP)
-    return min(_MAX_RETRY_SLEEP, 5.0 * (2 ** attempt))
+            base = 0.0
+    else:
+        match = re.search(r"available in\s+(\d+)\s+seconds", response.text or "", re.I)
+        base = float(match.group(1)) + 1.0 if match else 5.0 * (2 ** attempt)
+    return min(max(base + random.uniform(0.5, 2.5), 1.0), _MAX_RETRY_SLEEP)
 
 
 def throttled_request(self, method, url, *args, **kwargs):
@@ -55,10 +49,10 @@ def throttled_request(self, method, url, *args, **kwargs):
         if response.status_code != 429:
             return response
         if attempt >= _MAX_429_RETRIES:
-            print("CourtListener rate limit persisted after all retries; the required query will fail.", flush=True)
+            print("CourtListener rate limit persisted after all retries.", flush=True)
             return response
         delay = _retry_seconds(response, attempt)
-        print(f"CourtListener rate limit reached; retry {attempt + 1}/{_MAX_429_RETRIES} in {delay:.0f}s...", flush=True)
+        print(f"CourtListener 429; retry {attempt + 1}/{_MAX_429_RETRIES} in {delay:.0f}s", flush=True)
         time.sleep(delay)
     return response
 

@@ -25,22 +25,31 @@ class OutcomeClassificationTests(unittest.TestCase):
 
     def test_hypothetical_approval_is_not_confirmed(self):
         text = "If approved, Plaintiff's I-130 will permit the next immigration step."
-        self.assertEqual(specific_i130_outcome(text), (None, None))
+        self.assertEqual(specific_i130_outcome(text), (None, None, None))
 
     def test_failure_to_adjudicate_is_not_confirmed(self):
         text = "USCIS's failure to adjudicate Plaintiff's I-130 continues."
-        self.assertEqual(specific_i130_outcome(text), (None, None))
+        self.assertEqual(specific_i130_outcome(text), (None, None, None))
 
     def test_requested_relief_is_not_confirmed(self):
         text = "Plaintiff asks the Court to compel USCIS to adjudicate the I-130."
-        self.assertEqual(specific_i130_outcome(text), (None, None))
+        self.assertEqual(specific_i130_outcome(text), (None, None, None))
 
     def test_later_explicit_approval_is_confirmed(self):
-        label, context = specific_i130_outcome(
+        label, decision, context = specific_i130_outcome(
             "On June 4, 2026, USCIS approved Plaintiff's I-130."
         )
         self.assertEqual(label, "CONFIRMED_FAVORABLE")
+        self.assertEqual(decision, "APPROVED")
         self.assertIn("approved", context)
+
+    def test_later_explicit_denial_confirms_adjudication(self):
+        label, decision, context = specific_i130_outcome(
+            "After this action was filed, USCIS denied Plaintiff's I-130."
+        )
+        self.assertEqual(label, "CONFIRMED_FAVORABLE")
+        self.assertEqual(decision, "DENIED")
+        self.assertIn("denied", context)
 
     def test_voluntary_dismissal_remains_probable(self):
         outcome, _ = classify({"voluntary_dismissal": True}, "2026-06-05")
